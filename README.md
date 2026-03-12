@@ -12,90 +12,72 @@
 - 自动降级策略（Selenium → HTTP → 模拟数据）
 - Web 界面访问
 
-## 微博热搜功能说明
+## 如何启动
 
-微博热搜功能使用 Selenium 爬虫获取真实数据，具有以下特点：
+### 前置要求
 
-1. **自动降级策略**
-   - 优先使用 Selenium 获取真实数据
-   - 失败时降级到 HTTP 爬虫
-   - 最终降级到模拟数据
+1. **Python 3.10+**
+   - 检查版本: `python --version`
 
-2. **Selenium 配置**
-   - 环境变量 `WEIBO_USE_SELENIUM=true` 启用
-   - 首次运行会自动下载 ChromeDriver
-   - 需要系统安装 Chrome 浏览器
+2. **uv 包管理器** (推荐)
+   - 安装: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+   - 或 macOS: `brew install uv`
 
-3. **Chrome 安装**
+3. **Chrome 浏览器** (Selenium 爬虫需要)
    - **macOS**: `brew install --cask google-chrome`
    - **Ubuntu**: `sudo apt-get install google-chrome-stable`
    - **Windows**: 从 https://www.google.com/chrome/ 下载
 
-4. **测试工具**
-   - 访问 `/api/tools/test` 端点测试爬虫
-   - Agent 会自动判断何时调用热搜工具
+### 安装步骤
 
-## 使用示例
+1. **克隆项目**
+   ```bash
+   git clone https://github.com/mitrecx/news-agent.git
+   cd news-agent
+   ```
 
-你可以这样与 News Agent 对话：
+2. **安装依赖**
+   ```bash
+   uv sync
+   ```
 
+3. **配置环境变量**
+   ```bash
+   # 复制环境变量模板
+   cp .env.example .env
+
+   # 编辑 .env 文件，填入你的 DeepSeek API Key
+   # DEEPSEEK_API_KEY=your_actual_api_key_here
+   ```
+
+### 启动服务
+
+```bash
+uv run python run.py
+```
+
+启动成功后会看到类似输出：
+```
+✓ News Agent initialized with model: deepseek-chat
+✓ Loaded 1 tool(s): ['fetch_weibo_hot_search']
+INFO:     Uvicorn running on http://0.0.0.0:8000
+```
+
+### 访问应用
+
+- **Web 界面**: http://localhost:8000
+- **API 文档**: http://localhost:8000/docs
+- **健康检查**: http://localhost:8000/health
+
+### 测试微博热搜
+
+在 Web 界面中输入以下任一问题：
 - "今天有什么热搜？"
 - "微博上最近有什么热门话题？"
 - "看看现在的热搜榜"
-- "大家都在讨论什么？"
 
 Agent 会自动识别并调用微博热搜工具获取最新数据。
 
-## API 文档
-
-启动服务后，访问 `http://localhost:8000/docs` 查看 API 文档。
-
-### 核心 API
-
-#### POST /api/chat
-
-与 Agent 进行对话（非流式）
-
-**请求体：**
-```json
-{
-  "message": "今天有什么热搜？",
-  "history": []
-}
-```
-
-**响应：**
-```json
-{
-  "response": "📊 微博热搜榜：\n  1. xxx事件 (热度: 234.5万)\n  2. xxx话题..."
-}
-```
-
-#### POST /api/chat/stream
-
-与 Agent 进行对话（流式输出）
-
-**请求体：**
-```json
-{
-  "message": "今天有什么热搜？",
-  "history": []
-}
-```
-
-**响应：** Server-Sent Events (SSE) 流式数据
-
-#### GET /health
-
-健康检查
-
-**响应：**
-```json
-{
-  "status": "ok",
-  "agent_ready": true
-}
-```
 
 ## 项目结构
 
@@ -129,18 +111,6 @@ news-agent/
 | `AGENT_MODEL` | 使用的模型 | `deepseek-chat` |
 | `AGENT_TEMPERATURE` | 模型温度参数 | `0.7` |
 | `AGENT_MAX_TOKENS` | 最大 token 数 | `2000` |
-
-## 配置说明
-
-| 环境变量 | 说明 | 默认值 |
-|---------|------|--------|
-| `DEEPSEEK_API_KEY` | DeepSeek API 密钥 | 必填 |
-| `DEEPSEEK_BASE_URL` | DeepSeek API 地址 | `https://api.deepseek.com/v1` |
-| `HOST` | 服务监听地址 | `0.0.0.0` |
-| `PORT` | 服务端口 | `8000` |
-| `AGENT_MODEL` | 使用的模型 | `deepseek-chat` |
-| `AGENT_TEMPERATURE` | 模型温度参数 | `0.7` |
-| `AGENT_MAX_TOKENS` | 最大 token 数 | `2000` |
 | `WEIBO_SCRAPER_TIMEOUT` | 微博爬虫超时时间（秒） | `10` |
 | `WEIBO_USE_SELENIUM` | 是否使用 Selenium 爬虫 | `true` |
 
@@ -159,11 +129,6 @@ news-agent/
    - 轻量级，速度快
    - 可能被反爬拦截
 
-3. **模拟数据** - 当以上方式都失败时使用
-   - 确保功能可用
-   - 用于演示测试
-
-**降级策略：** Selenium → HTTP 爬虫 → 模拟数据
 
 ### LangChain 工具集成
 
