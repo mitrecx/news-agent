@@ -1,0 +1,38 @@
+[project]
+name = "news-agent"
+version = "0.1.0"
+description = "News agent based on LangChain and DeepSeek"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "python-dotenv>=1.0.1",
+    "langchain>=0.3.10",
+    "langchain-core>=0.3.28",
+    "langchain-openai>=0.2.14",
+    "langchain-community>=0.3.11",
+    "httpx>=0.27.2",
+    "pydantic>=2.10.1",
+    "pydantic-settings>=2.6.1",
+    "beautifulsoup4>=4.14.3",
+    "lxml>=6.0.2",
+    "selenium>=4.41.0",
+    "webdriver-manager>=4.0.2",
+]
+
+[project.optional-dependencies]
+weibo = [
+    "beautifulsoup4>=4.12.3",
+    "lxml>=5.3.0",
+]
+database = [
+    "sqlalchemy>=2.0.36",
+    "alembic>=1.14.0",
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+]
+
+[tool.uv]
+dev-dependencies = []
