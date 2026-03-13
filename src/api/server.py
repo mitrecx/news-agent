@@ -1,8 +1,9 @@
 """FastAPI server for news agent"""
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from contextlib import asynccontextmanager
 import os
 import json
@@ -12,6 +13,8 @@ from .models import ChatRequest, ChatResponse, HealthResponse
 from ..agent.base import NewsAgent
 from ..agent.config import get_settings
 from ..tools import fetch_weibo_hot_search
+from ..auth import db, router as auth_router, get_current_user
+from ..auth.models import User
 
 # 配置日志
 logging.basicConfig(
@@ -27,9 +30,16 @@ agent: NewsAgent | None = None
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager"""
+    # Initialize database
+    settings = get_settings()
+    try:
+        await db.connect()
+    except Exception as e:
+        print(f"✗ Failed to connect to database: {e}")
+        raise
+
     # Initialize agent
     global agent
-    settings = get_settings()
     try:
         # Initialize agent with tools
         tools = [fetch_weibo_hot_search]
@@ -43,6 +53,7 @@ async def lifespan(app: FastAPI):
     yield
 
     # Cleanup
+    await db.disconnect()
     print("Shutting down...")
 
 
@@ -52,6 +63,9 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan
 )
+
+# Include auth router
+app.include_router(auth_router)
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -74,12 +88,16 @@ async def test_weibo_tool():
 
 
 @app.post("/api/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
+async def chat(
+    request: ChatRequest,
+    current_user: User = Depends(get_current_user)
+):
     """
-    Chat with the news agent
+    Chat with the news agent (requires authentication)
 
     Args:
         request: Chat request with message and optional history
+        current_user: Authenticated user
 
     Returns:
         Chat response from the agent
@@ -88,8 +106,10 @@ async def chat(request: ChatRequest):
         raise HTTPException(status_code=503, detail="Agent not initialized")
 
     # 打印请求日志
-    logger.info(f"📨 收到聊天请求: {request.message[:50]}...")
+    user_info = f"用户: {current_user.username}"
+    logger.info(f"📨 收到聊天请求 ({user_info}): {request.message[:50]}...")
     print(f"\n{'='*60}")
+    print(f"💬 {user_info}")
     print(f"💬 用户消息: {request.message}")
     print(f"📜 历史记录数: {len(request.history) if request.history else 0}")
     print(f"{'='*60}\n")
@@ -116,12 +136,16 @@ async def chat(request: ChatRequest):
 
 
 @app.post("/api/chat/stream")
-async def chat_stream(request: ChatRequest):
+async def chat_stream(
+    request: ChatRequest,
+    current_user: User = Depends(get_current_user)
+):
     """
-    Chat with the news agent with streaming response
+    Chat with the news agent with streaming response (requires authentication)
 
     Args:
         request: Chat request with message and optional history
+        current_user: Authenticated user
 
     Returns:
         Streaming response from the agent
@@ -130,8 +154,10 @@ async def chat_stream(request: ChatRequest):
         raise HTTPException(status_code=503, detail="Agent not initialized")
 
     # 打印请求日志
-    logger.info(f"📨 [流式] 收到聊天请求: {request.message[:50]}...")
+    user_info = f"用户: {current_user.username}"
+    logger.info(f"📨 [流式] 收到聊天请求 ({user_info}): {request.message[:50]}...")
     print(f"\n{'='*60}")
+    print(f"💬 [流式] {user_info}")
     print(f"💬 [流式] 用户消息: {request.message}")
     print(f"📜 历史记录数: {len(request.history) if request.history else 0}")
     print(f"{'='*60}\n")

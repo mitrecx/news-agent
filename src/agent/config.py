@@ -26,6 +26,16 @@ class Settings(BaseSettings):
     weibo_use_selenium: bool = True  # 是否使用 Selenium 爬虫
     weibo_scraper_timeout: int = 10
 
+    # Database
+    db_host: str = "localhost"
+    db_port: int = 5432
+    db_user: str = "josie"
+    db_password: str = "bills_password_2024"
+    db_name: str = "news_agent"
+
+    # JWT
+    jwt_secret: str = "your-secret-key-change-this-in-production"
+
     class Config:
         env_file = ".env"
         case_sensitive = False

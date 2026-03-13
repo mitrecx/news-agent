@@ -10,7 +10,27 @@
 - 微博热搜查询功能（Agent 自动判断何时调用）
 - 支持 Selenium 爬虫绕过反爬
 - 自动降级策略（Selenium → HTTP → 模拟数据）
+- **用户认证系统** - 需要登录才能使用
 - Web 界面访问
+
+## 用户认证
+
+系统需要用户登录才能使用。
+
+- 使用用户名和密码登录
+- 默认测试账号：用户名 `test`，密码 `test`
+- 登录后可以与 Agent 对话，查询微博热搜等
+
+### 数据库配置
+
+首次启动前需要初始化数据库：
+
+```bash
+# 运行数据库初始化脚本
+uv run python scripts/init_db.py
+```
+
+这会创建 `news_agent` 数据库和测试用户。
 
 ## 如何启动
 
@@ -90,11 +110,19 @@ news-agent/
 │   ├── api/             # API 服务
 │   │   ├── server.py    # FastAPI 服务器
 │   │   └── models.py    # 请求/响应模型
+│   ├── auth/            # 认证模块
+│   │   ├── router.py    # 认证路由
+│   │   ├── models.py    # 用户模型
+│   │   ├── security.py  # 安全工具（密码哈希、JWT）
+│   │   ├── database.py  # 数据库连接
+│   │   └── user_service.py # 用户服务
 │   ├── tools/           # LangChain 工具集成
 │   │   ├── __init__.py  # 工具导出
 │   │   └── weibo.py     # 微博热搜爬虫
 │   └── frontend/        # 前端页面
 │       └── index.html
+├── scripts/             # 脚本目录
+│   └── init_db.py       # 数据库初始化脚本
 ├── .env.example         # 环境变量示例
 ├── pyproject.toml       # 项目配置
 └── run.py              # 启动脚本
@@ -113,6 +141,12 @@ news-agent/
 | `AGENT_MAX_TOKENS` | 最大 token 数 | `2000` |
 | `WEIBO_SCRAPER_TIMEOUT` | 微博爬虫超时时间（秒） | `10` |
 | `WEIBO_USE_SELENIUM` | 是否使用 Selenium 爬虫 | `true` |
+| `DB_HOST` | 数据库主机 | `localhost` |
+| `DB_PORT` | 数据库端口 | `5432` |
+| `DB_USER` | 数据库用户名 | `your_username` |
+| `DB_PASSWORD` | 数据库密码 | `your_password` |
+| `DB_NAME` | 数据库名称 | `news_agent` |
+| `JWT_SECRET` | JWT 密钥 | `your-secret-key-change-this` |
 
 ## 技术实现
 

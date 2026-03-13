@@ -39,6 +39,7 @@
             color: white;
             padding: 20px;
             text-align: center;
+            position: relative;
         }
 
         .header h1 {
@@ -50,6 +51,35 @@
             font-size: 14px;
             opacity: 0.9;
             margin-top: 5px;
+        }
+
+        .user-info {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 14px;
+        }
+
+        .user-info .username {
+            font-weight: 500;
+        }
+
+        .user-info .logout-btn {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: background 0.2s;
+        }
+
+        .user-info .logout-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
         }
 
         .status {
@@ -225,6 +255,138 @@
             font-size: 14px;
         }
 
+        /* Login modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .modal {
+            background: white;
+            border-radius: 16px;
+            padding: 40px;
+            width: 90%;
+            max-width: 400px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+
+        .modal h2 {
+            font-size: 24px;
+            margin-bottom: 8px;
+            color: #1f2937;
+            text-align: center;
+        }
+
+        .modal .subtitle {
+            text-align: center;
+            color: #6b7280;
+            margin-bottom: 24px;
+            font-size: 14px;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 14px;
+            color: #374151;
+            font-weight: 500;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .form-group input:focus {
+            border-color: #667eea;
+        }
+
+        .form-actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 24px;
+        }
+
+        .form-actions button {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .form-actions .primary-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .form-actions .primary-btn:hover {
+            opacity: 0.9;
+        }
+
+        .form-actions .secondary-btn {
+            background: #f3f4f6;
+            color: #374151;
+        }
+
+        .form-actions .secondary-btn:hover {
+            background: #e5e7eb;
+        }
+
+        .form-actions button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .error-message {
+            color: #ef4444;
+            font-size: 12px;
+            margin-top: 8px;
+            text-align: center;
+            min-height: 16px;
+        }
+
+        .guest-link {
+            text-align: center;
+            margin-top: 16px;
+            font-size: 14px;
+            color: #6b7280;
+        }
+
+        .guest-link a {
+            color: #667eea;
+            text-decoration: none;
+            cursor: pointer;
+        }
+
+        .guest-link a:hover {
+            text-decoration: underline;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
         /* Scrollbar styling */
         .messages::-webkit-scrollbar {
             width: 6px;
@@ -245,6 +407,31 @@
     </style>
 </head>
 <body>
+    <!-- Login Modal -->
+    <div class="modal-overlay" id="loginModal">
+        <div class="modal">
+            <h2>欢迎使用 News Agent</h2>
+            <p class="subtitle">请登录以继续</p>
+
+            <div class="form-group">
+                <label>用户名</label>
+                <input type="text" id="loginUsername" placeholder="请输入用户名" value="test">
+            </div>
+
+            <div class="form-group">
+                <label>密码</label>
+                <input type="password" id="loginPassword" placeholder="请输入密码" value="test">
+            </div>
+
+            <div class="error-message" id="loginError"></div>
+
+            <div class="form-actions">
+                <button class="primary-btn" id="loginBtn" style="width: 100%">登录</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Chat Interface -->
     <div class="container">
         <div class="header">
             <h1>News Agent</h1>
@@ -252,6 +439,10 @@
             <div class="status">
                 <span class="status-dot" id="statusDot"></span>
                 <span id="statusText">连接中...</span>
+            </div>
+            <div class="user-info hidden" id="userInfo">
+                <span class="username" id="username"></span>
+                <button class="logout-btn" id="logoutBtn">退出</button>
             </div>
         </div>
 
@@ -277,6 +468,14 @@
         const welcome = document.getElementById('welcome');
         const statusDot = document.getElementById('statusDot');
         const statusText = document.getElementById('statusText');
+        const loginModal = document.getElementById('loginModal');
+        const loginBtn = document.getElementById('loginBtn');
+        const loginUsername = document.getElementById('loginUsername');
+        const loginPassword = document.getElementById('loginPassword');
+        const loginError = document.getElementById('loginError');
+        const userInfo = document.getElementById('userInfo');
+        const username = document.getElementById('username');
+        const logoutBtn = document.getElementById('logoutBtn');
 
         let conversationHistory = [];
         let isConnected = false;
@@ -285,6 +484,8 @@
         let currentBubble = null;
         let currentCursor = null;
         let currentMessage = '';
+        let authToken = null;
+        let currentUser = null;
 
         // Check health status
         async function checkHealth() {
@@ -301,10 +502,74 @@
             }
         }
 
+        // Login
+        async function login() {
+            const usernameValue = loginUsername.value.trim();
+            const passwordValue = loginPassword.value;
+
+            if (!usernameValue || !passwordValue) {
+                loginError.textContent = '请输入用户名和密码';
+                return;
+            }
+
+            loginBtn.disabled = true;
+            loginError.textContent = '';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/auth/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        username: usernameValue,
+                        password: passwordValue
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('登录失败');
+                }
+
+                const data = await response.json();
+                authToken = data.access_token;
+                currentUser = data.user;
+
+                // Update UI
+                loginModal.classList.add('hidden');
+                userInfo.classList.remove('hidden');
+                username.textContent = currentUser.username;
+
+                // Check if agent is ready
+                await checkHealth();
+            } catch (error) {
+                loginError.textContent = '用户名或密码错误';
+            } finally {
+                loginBtn.disabled = false;
+            }
+        }
+
+        // Logout
+        function logout() {
+            authToken = null;
+            currentUser = null;
+            userInfo.classList.add('hidden');
+            loginModal.classList.remove('hidden');
+            conversationHistory = [];
+            messagesContainer.innerHTML = `
+                <div class="welcome" id="welcome">
+                    <h2>欢迎使用 News Agent</h2>
+                    <p>基于 DeepSeek 模型的智能对话助手</p>
+                    <p style="margin-top: 10px; font-size: 12px;">支持查询微博热搜</p>
+                </div>
+            `;
+        }
+
         // Create assistant message element
         function createAssistantMessage() {
-            if (welcome) {
-                welcome.style.display = 'none';
+            const welcomeEl = document.getElementById('welcome');
+            if (welcomeEl) {
+                welcomeEl.style.display = 'none';
             }
 
             const messageDiv = document.createElement('div');
@@ -328,8 +593,9 @@
 
         // Add user message to chat
         function addUserMessage(content) {
-            if (welcome) {
-                welcome.style.display = 'none';
+            const welcomeEl = document.getElementById('welcome');
+            if (welcomeEl) {
+                welcomeEl.style.display = 'none';
             }
 
             const messageDiv = document.createElement('div');
@@ -374,7 +640,6 @@
             }
 
             if (currentBubble) {
-                // Mark as interrupted if there's partial content
                 const content = currentBubble.textContent.replace(/^已中断$/, '').trim();
                 if (content) {
                     currentBubble.classList.add('interrupted');
@@ -429,12 +694,18 @@
             bubble.appendChild(cursor);
             currentCursor = cursor;
 
+            // Prepare headers
+            const headers = {
+                'Content-Type': 'application/json',
+            };
+            if (authToken) {
+                headers['Authorization'] = `Bearer ${authToken}`;
+            }
+
             try {
                 const response = await fetch(`${API_BASE}/api/chat/stream`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: headers,
                     body: JSON.stringify({
                         message: message,
                         history: conversationHistory
@@ -460,7 +731,6 @@
                         if (line.startsWith('data: ')) {
                             const data = line.slice(6);
                             if (data === '[DONE]') {
-                                // Stream finished
                                 cursor.remove();
                                 currentCursor = null;
                                 conversationHistory.push({ role: 'user', content: message });
@@ -489,9 +759,7 @@
                     }
                 }
             } catch (error) {
-                // Check if it was aborted
                 if (error.name === 'AbortError') {
-                    // User cancelled the request
                     if (fullResponse) {
                         bubble.classList.add('interrupted');
                         bubble.textContent = fullResponse + ' (已中断)';
@@ -517,6 +785,8 @@
         }
 
         // Event listeners
+        loginBtn.addEventListener('click', login);
+        logoutBtn.addEventListener('click', logout);
         actionBtn.addEventListener('click', sendMessage);
         input.addEventListener('keypress', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
@@ -525,12 +795,28 @@
             }
         });
 
+        loginUsername.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                loginPassword.focus();
+            }
+        });
+
+        loginPassword.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                login();
+            }
+        });
+
         // Check health on load
         checkHealth();
         setInterval(checkHealth, 30000); // Check every 30 seconds
 
         // Focus input on load
-        input.focus();
+        if (loginModal.classList.contains('hidden')) {
+            input.focus();
+        } else {
+            loginUsername.focus();
+        }
     </script>
 </body>
 </html>
