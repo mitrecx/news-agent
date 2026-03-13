@@ -109,6 +109,12 @@ class NewsAgent:
                         ))
                         break
 
+            # Check if tool result should be returned directly
+            tool_result = lc_messages[-1].content
+            if tool_result.startswith("📊 微博热搜榜："):
+                # Direct return for weibo hot search
+                return tool_result
+
             # Get final response after tool execution
             final_response = await self.llm_with_tools.ainvoke(lc_messages)
             return final_response.content
@@ -172,11 +178,15 @@ class NewsAgent:
 
             # Handle tool calls
             if hasattr(response, 'tool_calls') and response.tool_calls:
-                # Stream the initial response content
-                if hasattr(response, 'content') and response.content:
+                # Check if this is weibo hot search tool
+                is_weibo_tool = any(tc.get('name') == 'fetch_weibo_hot_search' for tc in response.tool_calls)
+
+                # Stream the initial response content (skip for weibo tool)
+                if not is_weibo_tool and hasattr(response, 'content') and response.content:
                     yield response.content
 
                 # Execute tool calls
+                weibo_returned = False
                 for tool_call in response.tool_calls:
                     tool_name = tool_call.get('name')
                     tool_args = tool_call.get('args', {})
@@ -194,6 +204,12 @@ class NewsAgent:
                                     content=result,
                                     tool_call_id=tool_call.get('id', '')
                                 ))
+
+                                # Check if result should be returned directly
+                                if result.startswith("📊 微博热搜榜："):
+                                    # Direct return for weibo hot search
+                                    yield result
+                                    weibo_returned = True
                             except asyncio.TimeoutError:
                                 logger.error(f"chat_stream: tool execution timeout: {tool_name}")
                                 yield "\n\n抱歉，工具执行超时，请重试。"
@@ -203,6 +219,10 @@ class NewsAgent:
                                 yield f"\n\n抱歉，工具执行失败: {str(e)}"
                                 return
                             break
+
+                # Skip LLM processing if weibo hot search was returned
+                if weibo_returned:
+                    return
 
                 # Stream final response after tool execution
                 try:

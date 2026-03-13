@@ -401,9 +401,7 @@ class WeiboScraper:
         for item in items:
             lines.append(f"  {item}")
 
-        # 添加提示，告诉 LLM 直接返回
-        result = "\n".join(lines)
-        return f"{{{{请直接返回以下热搜列表，不要进行任何总结或加工}}}}\n\n{result}"
+        return "\n".join(lines)
 
 
 # 单例实例

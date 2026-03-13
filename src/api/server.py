@@ -1,8 +1,7 @@
 """FastAPI server for news agent"""
 
 from fastapi import FastAPI, HTTPException, Depends
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from contextlib import asynccontextmanager
 import os
@@ -412,16 +411,12 @@ async def chat_stream(
     )
 
 
-# Mount static files for frontend
-frontend_dir = os.path.join(os.path.dirname(__file__), "..", "frontend")
-
+# Note: Frontend now runs separately on http://localhost:6173 (Vue dev server)
+# This root endpoint returns API status
 @app.get("/")
-async def serve_frontend():
-    """Serve frontend"""
-    index_file = os.path.join(frontend_dir, "index.html")
-    if os.path.exists(index_file):
-        return FileResponse(index_file)
-    return {"message": "News Agent API - Frontend not found"}
+async def root():
+    """Root endpoint - API status"""
+    return {"message": "News Agent API is running", "frontend": "http://localhost:6173"}
 
 
 if __name__ == "__main__":
