@@ -38,10 +38,6 @@
           </el-button>
         </el-form-item>
       </el-form>
-
-      <div class="login-footer">
-        <p>测试账号: test / test</p>
-      </div>
     </div>
   </div>
 </template>
@@ -58,8 +54,8 @@ const authStore = useAuthStore()
 
 const formRef = ref<FormInstance>()
 const form = reactive({
-  username: 'test',
-  password: 'test',
+  username: '',
+  password: '',
 })
 
 const rules: FormRules = {
@@ -118,18 +114,6 @@ const handleLogin = async () => {
 .login-header p {
   font-size: 14px;
   color: #6b7280;
-}
-
-.login-footer {
-  text-align: center;
-  margin-top: 24px;
-  padding-top: 24px;
-  border-top: 1px solid #e5e7eb;
-}
-
-.login-footer p {
-  font-size: 12px;
-  color: #9ca3af;
 }
 
 .login-card :deep(.el-form-item) {

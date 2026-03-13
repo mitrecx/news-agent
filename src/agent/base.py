@@ -127,6 +127,9 @@ class NewsAgent:
             Chunks of the response
         """
         from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+        import asyncio
+        import logging
+        logger = logging.getLogger(__name__)
 
         if history is None:
             history = []
@@ -152,11 +155,27 @@ class NewsAgent:
 
         # Check if tools are needed
         if self.tools:
-            # First, invoke to check if tools are needed
-            response = await self.llm_with_tools.ainvoke(lc_messages)
+            # First, check if tools are needed by invoking
+            try:
+                response = await asyncio.wait_for(
+                    self.llm_with_tools.ainvoke(lc_messages),
+                    timeout=30.0
+                )
+            except asyncio.TimeoutError:
+                logger.error("chat_stream: ainvoke timeout")
+                yield "抱歉，请求超时，请重试。"
+                return
+            except Exception as e:
+                logger.error(f"chat_stream: ainvoke error: {e}", exc_info=True)
+                yield f"抱歉，发生错误: {str(e)}"
+                return
 
             # Handle tool calls
             if hasattr(response, 'tool_calls') and response.tool_calls:
+                # Stream the initial response content
+                if hasattr(response, 'content') and response.content:
+                    yield response.content
+
                 # Execute tool calls
                 for tool_call in response.tool_calls:
                     tool_name = tool_call.get('name')
@@ -165,28 +184,44 @@ class NewsAgent:
                     # Find and execute the tool
                     for tool in self.tools:
                         if tool.name == tool_name:
-                            result = await tool.ainvoke(tool_args)
-                            # Add tool result to messages
-                            lc_messages.append(response)
-                            lc_messages.append(ToolMessage(
-                                content=result,
-                                tool_call_id=tool_call.get('id', '')
-                            ))
+                            try:
+                                result = await asyncio.wait_for(
+                                    tool.ainvoke(tool_args),
+                                    timeout=60.0
+                                )
+                                lc_messages.append(response)
+                                lc_messages.append(ToolMessage(
+                                    content=result,
+                                    tool_call_id=tool_call.get('id', '')
+                                ))
+                            except asyncio.TimeoutError:
+                                logger.error(f"chat_stream: tool execution timeout: {tool_name}")
+                                yield "\n\n抱歉，工具执行超时，请重试。"
+                                return
+                            except Exception as e:
+                                logger.error(f"chat_stream: tool execution error: {e}", exc_info=True)
+                                yield f"\n\n抱歉，工具执行失败: {str(e)}"
+                                return
                             break
 
                 # Stream final response after tool execution
-                async for chunk in self.llm_with_tools.astream(lc_messages):
-                    if hasattr(chunk, 'content'):
-                        yield chunk.content
+                try:
+                    async for chunk in self.llm_with_tools.astream(lc_messages):
+                        if hasattr(chunk, 'content') and chunk.content:
+                            yield chunk.content
+                except Exception as e:
+                    logger.error(f"chat_stream: final response streaming error: {e}", exc_info=True)
+                    yield f"\n\n抱歉，生成响应时出错: {str(e)}"
             else:
                 # No tool calls needed, stream the response
-                async for chunk in self.llm_with_tools.astream(lc_messages):
-                    if hasattr(chunk, 'content'):
-                        yield chunk.content
+                if hasattr(response, 'content') and response.content:
+                    yield response.content
+                else:
+                    yield "抱歉，我没有收到有效的响应。"
         else:
             # No tools, just stream
             async for chunk in self.llm.astream(lc_messages):
-                if hasattr(chunk, 'content'):
+                if hasattr(chunk, 'content') and chunk.content:
                     yield chunk.content
 
     def chat_sync(self, message: str, history: list[dict] | None = None) -> str:

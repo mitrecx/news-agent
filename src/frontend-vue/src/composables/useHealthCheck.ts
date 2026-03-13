@@ -1,4 +1,4 @@
-import { ref, onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted } from 'vue'
 import { healthCheck } from '@/api/chat'
 import { useChatStore } from '@/stores/chat'
 

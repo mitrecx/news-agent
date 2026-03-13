@@ -3,7 +3,6 @@
 from datetime import datetime
 from typing import List
 from dataclasses import dataclass
-from enum import Enum
 import asyncio
 import logging
 
@@ -25,15 +24,6 @@ try:
     SELENIUM_AVAILABLE = True
 except ImportError:
     SELENIUM_AVAILABLE = False
-
-
-class HotCategory(str, Enum):
-    """热搜分类"""
-    ALL = "全部"
-    ENT = "娱乐"
-    SOCIAL = "社会"
-    TECH = "科技"
-    FINANCE = "财经"
 
 
 @dataclass
@@ -94,12 +84,12 @@ class WeiboScraper:
             "Referer": "https://weibo.com",
         }
 
-    async def fetch_hot_search(self, limit: int = 20) -> List[HotSearchItem]:
+    async def fetch_hot_search(self, limit: int = 40) -> List[HotSearchItem]:
         """
         获取微博热搜榜
 
         Args:
-            limit: 返回热搜数量，默认20条
+            limit: 返回热搜数量，默认40条
 
         Returns:
             热搜条目列表
@@ -320,8 +310,8 @@ class WeiboScraper:
                 if icon_span:
                     icon = icon_span.get_text(strip=True)
 
-                # 解析分类
-                category = HotCategory.ALL.value
+                # 解析分类（不显示）
+                category = ""
                 category_cell = row.find("td", class_="cate")
                 if category_cell:
                     category = category_cell.get_text(strip=True)
@@ -392,12 +382,12 @@ class WeiboScraper:
 
         return items
 
-    async def get_hot_search_summary(self, limit: int = 10) -> str:
+    async def get_hot_search_summary(self, limit: int = 40) -> str:
         """
         获取热搜摘要（用于 Agent 工具）
 
         Args:
-            limit: 返回热搜数量
+            limit: 返回热搜数量，默认40条
 
         Returns:
             格式化的热搜摘要文本
@@ -411,7 +401,9 @@ class WeiboScraper:
         for item in items:
             lines.append(f"  {item}")
 
-        return "\n".join(lines)
+        # 添加提示，告诉 LLM 直接返回
+        result = "\n".join(lines)
+        return f"{{{{请直接返回以下热搜列表，不要进行任何总结或加工}}}}\n\n{result}"
 
 
 # 单例实例

@@ -9,20 +9,16 @@ logger = logging.getLogger(__name__)
 
 
 @tool
-async def fetch_weibo_hot_search(limit: int = 10) -> str:
+async def fetch_weibo_hot_search(limit: int = 40) -> str:
     """
-    获取微博热搜榜，返回当前最热门的话题
+    获取微博热搜榜 TOP 40
 
-    当用户询问以下内容时，使用此工具：
-    - "微博热搜"、"热搜榜"、"热门话题"
-    - "今天有什么热点"、"最近有什么新闻"
-    - "热门事件"、"大家都在聊什么"
+    【重要】此工具返回的已经是格式化好的热搜列表，你必须直接原样返回给用户，不要进行任何总结、归纳或加工。
+
+    使用场景：当用户询问微博热搜、热门话题、今日热点等
 
     Args:
-        limit: 返回热搜数量，默认10条，最多50条
-
-    Returns:
-        格式化的热搜列表文本，包含排名、标题和热度值
+        limit: 返回热搜数量，默认40条
     """
     if limit < 1:
         limit = 10

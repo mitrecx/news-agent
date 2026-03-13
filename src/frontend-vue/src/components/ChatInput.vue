@@ -44,8 +44,8 @@ const handleSend = () => {
   inputMessage.value = ''
 }
 
-const handleKeydown = (event: KeyboardEvent) => {
-  if (event.key === 'Enter' && !event.shiftKey) {
+const handleKeydown = (event: Event | KeyboardEvent) => {
+  if (event instanceof KeyboardEvent && event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault()
     handleSend()
   }

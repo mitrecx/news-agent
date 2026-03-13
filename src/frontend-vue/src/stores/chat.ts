@@ -7,6 +7,7 @@ export const useChatStore = defineStore('chat', () => {
   const messages = ref<ChatMessage[]>([])
   const isStreaming = ref(false)
   const isConnected = ref(false)
+  const conversationId = ref<number | null>(null)
 
   /** Actions */
   const addMessage = (message: ChatMessage) => {
@@ -34,14 +35,25 @@ export const useChatStore = defineStore('chat', () => {
     messages.value = []
   }
 
+  const setConversationId = (id: number | null) => {
+    conversationId.value = id
+  }
+
+  const loadMessages = (historyMessages: ChatMessage[]) => {
+    messages.value = historyMessages
+  }
+
   return {
     messages,
     isStreaming,
     isConnected,
+    conversationId,
     addMessage,
     updateLastMessage,
     setStreaming,
     setConnected,
     clearMessages,
+    setConversationId,
+    loadMessages,
   }
 })

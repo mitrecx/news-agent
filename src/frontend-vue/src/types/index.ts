@@ -29,11 +29,30 @@ export interface ChatMessage {
 export interface ChatRequest {
   message: string
   history?: ChatMessage[]
+  conversation_id?: number
 }
 
 /** Chat response */
 export interface ChatResponse {
   response: string
+  conversation_id?: number
+}
+
+/** Conversation types */
+export interface Conversation {
+  id: number
+  user_id: number
+  title: string
+  created_at: string
+  updated_at: string
+}
+
+export interface MessageInDB {
+  id: number
+  conversation_id: number
+  role: string
+  content: string
+  created_at: string
 }
 
 /** Health response */

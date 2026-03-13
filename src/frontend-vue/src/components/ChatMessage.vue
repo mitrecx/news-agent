@@ -6,6 +6,7 @@
     <div class="bubble">
       <div v-if="message.role === 'assistant'" class="markdown-content" v-html="renderedContent"></div>
       <div v-else class="text-content">{{ message.content }}</div>
+      <span v-if="isStreaming" class="cursor"></span>
     </div>
   </div>
 </template>
@@ -17,6 +18,7 @@ import type { ChatMessage } from '@/types'
 
 const props = defineProps<{
   message: ChatMessage
+  isStreaming?: boolean
 }>()
 
 const md = new MarkdownIt({
@@ -73,8 +75,6 @@ const renderedContent = computed(() => {
 }
 
 .bubble {
-  padding: 12px 16px;
-  border-radius: 12px;
   font-size: 14px;
   line-height: 1.6;
   word-wrap: break-word;
@@ -82,12 +82,13 @@ const renderedContent = computed(() => {
 }
 
 .user .bubble {
+  padding: 12px 16px;
+  border-radius: 12px;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
 }
 
 .assistant .bubble {
-  background: #f3f4f6;
   color: #1f2937;
 }
 
@@ -141,6 +142,27 @@ const renderedContent = computed(() => {
 
 .markdown-content :deep(a:hover) {
   text-decoration: underline;
+}
+
+.cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: #667eea;
+  animation: blink 1s infinite;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+}
+
+@keyframes blink {
+  0%,
+  50% {
+    opacity: 1;
+  }
+  51%,
+  100% {
+    opacity: 0;
+  }
 }
 
 @keyframes fadeIn {
