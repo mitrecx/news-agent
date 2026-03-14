@@ -1,7 +1,7 @@
 """Weibo hot search scraper - 微博热搜爬虫"""
 
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 from dataclasses import dataclass
 from enum import Enum
 import asyncio
@@ -10,8 +10,13 @@ import logging
 import httpx
 from bs4 import BeautifulSoup
 
-# 配置日志
-logger = logging.getLogger(__name__)
+# Import utility modules
+from ..utils.cache import cached, get_cache
+from ..utils.retry import retry_with_backoff, RetryConfig
+from ..utils.logger import get_logger
+
+# Configure enhanced logger
+logger = get_logger(__name__)
 
 # Selenium 相关导入（可选）
 try:
@@ -94,6 +99,7 @@ class WeiboScraper:
             "Referer": "https://weibo.com",
         }
 
+    @retry_with_backoff(config=RetryConfig(max_attempts=3, min_wait=2.0))
     async def fetch_hot_search(self, limit: int = 20) -> List[HotSearchItem]:
         """
         获取微博热搜榜
@@ -392,6 +398,7 @@ class WeiboScraper:
 
         return items
 
+    @cached(ttl=300, key_prefix="weibo_summary")  # Cache for 5 minutes
     async def get_hot_search_summary(self, limit: int = 10) -> str:
         """
         获取热搜摘要（用于 Agent 工具）
