@@ -56,6 +56,49 @@ async def init_database():
         """)
         print("✓ Index created")
 
+        # Create conversations table
+        print("\nCreating conversations table...")
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS conversations (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                title VARCHAR(200) NOT NULL DEFAULT '新对话',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        print("✓ Conversations table created")
+
+        # Create index for conversations
+        print("Creating indexes for conversations...")
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations(user_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_conversations_updated_at ON conversations(updated_at DESC)
+        """)
+        print("✓ Indexes created")
+
+        # Create messages table
+        print("\nCreating messages table...")
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS messages (
+                id SERIAL PRIMARY KEY,
+                conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+                role VARCHAR(20) NOT NULL CHECK (role IN ('user', 'assistant')),
+                content TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        print("✓ Messages table created")
+
+        # Create index for messages
+        print("Creating index for messages...")
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_messages_conversation_id ON messages(conversation_id)
+        """)
+        print("✓ Index created")
+
         # Check if test user exists
         print("\nChecking for test user...")
         existing_user = await conn.fetchval(
