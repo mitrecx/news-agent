@@ -1,4 +1,8 @@
-"""FastAPI server for news agent"""
+"""FastAPI server for news agent.
+
+This module provides the main FastAPI application with security middleware,
+authentication, and chat endpoints.
+"""
 
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import StreamingResponse
@@ -9,6 +13,7 @@ import json
 import logging
 
 from .models import ChatRequest, ChatResponse, HealthResponse
+from .middleware import setup_cors, setup_security_middleware
 from ..agent.base import NewsAgent
 from ..agent.config import get_settings
 from ..tools import fetch_weibo_hot_search
@@ -29,12 +34,19 @@ agent: NewsAgent | None = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Lifespan context manager"""
-    # Initialize database
+    """
+    Lifespan context manager for startup and shutdown events.
+
+    Handles database connection initialization and agent startup.
+    """
     settings = get_settings()
+
+    # Initialize database
     try:
         await db.connect()
+        logger.info("✓ Database connection established")
     except Exception as e:
+        logger.error(f"✗ Failed to connect to database: {e}", exc_info=True)
         print(f"✗ Failed to connect to database: {e}")
         raise
 
@@ -44,24 +56,45 @@ async def lifespan(app: FastAPI):
         # Initialize agent with tools
         tools = [fetch_weibo_hot_search]
         agent = NewsAgent(tools=tools)
+        logger.info(f"✓ News Agent initialized with model: {settings.agent_model}")
+        logger.info(f"✓ Loaded {len(tools)} tool(s): {[t.name for t in tools]}")
         print(f"✓ News Agent initialized with model: {settings.agent_model}")
         print(f"✓ Loaded {len(tools)} tool(s): {[t.name for t in tools]}")
     except Exception as e:
+        logger.error(f"✗ Failed to initialize agent: {e}", exc_info=True)
         print(f"✗ Failed to initialize agent: {e}")
         raise
 
     yield
 
     # Cleanup
-    await db.disconnect()
-    print("Shutting down...")
+    try:
+        await db.disconnect()
+        logger.info("✓ Database connection closed")
+        print("Shutting down...")
+    except Exception as e:
+        logger.error(f"✗ Error during shutdown: {e}", exc_info=True)
 
 
+# Create FastAPI application
 app = FastAPI(
     title="News Agent",
     description="News assistant powered by LangChain and DeepSeek",
-    version="0.1.0",
-    lifespan=lifespan
+    version="0.2.0",
+    lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc"
+)
+
+# Setup CORS
+setup_cors(app)
+
+# Setup security middleware (rate limiting, security headers)
+setup_security_middleware(
+    app,
+    requests_per_minute=60,  # 60 requests per minute
+    requests_per_hour=1000,  # 1000 requests per hour
+    enable_rate_limit=True
 )
 
 # Include auth router
