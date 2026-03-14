@@ -169,9 +169,16 @@ class WeiboScraper:
         if not SELENIUM_AVAILABLE:
             raise Exception("Selenium 未安装")
 
-        # 在新线程中运行 Selenium（避免阻塞事件循环）
+        # 在新线程中运行 Selenium（避免阻塞事件循环），添加超时
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self._selenium_fetch_sync, limit)
+        try:
+            return await asyncio.wait_for(
+                loop.run_in_executor(None, self._selenium_fetch_sync, limit),
+                timeout=30.0  # 30秒超时
+            )
+        except asyncio.TimeoutError:
+            logger.error("❌ Selenium 初始化超时 (30秒)")
+            raise Exception("Selenium 初始化超时，可能 Chrome 浏览器未安装或启动失败")
 
     def _selenium_fetch_sync(self, limit: int) -> List[HotSearchItem]:
         """
@@ -198,8 +205,21 @@ class WeiboScraper:
         chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
 
         # 自动下载并使用 ChromeDriver
-        service = Service(ChromeDriverManager().install())
-        driver = webdriver.Chrome(service=service, options=chrome_options)
+        logger.info("📦 安装 ChromeDriver...")
+        try:
+            service = Service(ChromeDriverManager().install())
+            logger.info("✅ ChromeDriver 安装成功")
+        except Exception as e:
+            logger.error(f"❌ ChromeDriver 安装失败: {e}")
+            raise Exception(f"ChromeDriver 安装失败: {e}")
+
+        logger.info("🚀 启动 Chrome 浏览器...")
+        try:
+            driver = webdriver.Chrome(service=service, options=chrome_options)
+            logger.info("✅ Chrome 浏览器启动成功")
+        except Exception as e:
+            logger.error(f"❌ Chrome 浏览器启动失败: {e}")
+            raise Exception(f"Chrome 浏览器启动失败: {e}")
 
         try:
             # 访问页面

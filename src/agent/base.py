@@ -167,6 +167,13 @@ class NewsAgent:
                     self.llm_with_tools.ainvoke(lc_messages),
                     timeout=30.0
                 )
+                # Debug: log response details
+                logger.info(f"[DEBUG] Response type: {type(response)}")
+                logger.info(f"[DEBUG] Has tool_calls: {hasattr(response, 'tool_calls')}")
+                if hasattr(response, 'tool_calls'):
+                    logger.info(f"[DEBUG] Tool calls: {response.tool_calls}")
+                if hasattr(response, 'content'):
+                    logger.info(f"[DEBUG] Content: {response.content[:200] if response.content else 'None'}")
             except asyncio.TimeoutError:
                 logger.error("chat_stream: ainvoke timeout")
                 yield "抱歉，请求超时，请重试。"
@@ -234,9 +241,12 @@ class NewsAgent:
                     yield f"\n\n抱歉，生成响应时出错: {str(e)}"
             else:
                 # No tool calls needed, stream the response
+                logger.info("[DEBUG] No tool calls detected, yielding content directly")
                 if hasattr(response, 'content') and response.content:
+                    logger.info(f"[DEBUG] Yielding content: {response.content[:100]}...")
                     yield response.content
                 else:
+                    logger.warning("[DEBUG] No content in response, yielding fallback")
                     yield "抱歉，我没有收到有效的响应。"
         else:
             # No tools, just stream

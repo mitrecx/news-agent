@@ -1,10 +1,14 @@
-import { ref } from 'vue'
+import { ref, onUnmounted } from 'vue'
 import { sendChatStream } from '@/api/chat'
 import { useChatStore } from '@/stores/chat'
 import { useConversationStore } from '@/stores/conversation'
 import { useAuthStore } from '@/stores/auth'
 import { ElMessage } from 'element-plus'
 import * as conversationApi from '@/api/conversation'
+
+// Generate unique instance ID for debugging
+const instanceId = Math.random().toString(36).substring(2, 9)
+console.log(`[useChatStream] 🆔 Instance created: ${instanceId}`)
 
 export function useChatStream() {
   const chatStore = useChatStore()
@@ -13,13 +17,42 @@ export function useChatStream() {
   const abortController = ref<AbortController | null>(null)
   const currentResponse = ref('')
   const progressMessage = ref('')
+  const isSending = ref(false) // Track if a message is being sent
+
+  // Cleanup on component unmount
+  onUnmounted(() => {
+    console.log(`[useChatStream:${instanceId}] 🗑️ Instance unmounted`)
+    // Stop any ongoing request
+    if (abortController.value) {
+      abortController.value.abort()
+      abortController.value = null
+    }
+    // Reset state
+    isSending.value = false
+    currentResponse.value = ''
+    progressMessage.value = ''
+  })
 
   /** Send message with streaming */
   const sendMessage = async (message: string) => {
-    if (chatStore.isStreaming) {
-      stopStreaming()
+    // Prevent duplicate requests
+    if (isSending.value) {
+      console.log(`[useChatStream:${instanceId}] ⚠️ Request already in progress, ignoring duplicate send`, {
+        message,
+        isSending: isSending.value,
+        isStreaming: chatStore.isStreaming
+      })
       return
     }
+
+    if (chatStore.isStreaming) {
+      console.log(`[useChatStream:${instanceId}] ⚠️ Already streaming, stopping previous stream`)
+      stopStreaming()
+      // Give it a moment to stop before starting new request
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+
+    console.log(`[useChatStream:${instanceId}] 📤 Sending message:`, message)
 
     if (!authStore.token) {
       ElMessage.error('请先登录')
@@ -30,6 +63,8 @@ export function useChatStream() {
       ElMessage.error('Agent 未就绪，请稍后重试')
       return
     }
+
+    isSending.value = true
 
     // Add user message
     chatStore.addMessage({ role: 'user', content: message })
@@ -92,6 +127,8 @@ export function useChatStream() {
       progressMessage.value = ''
       ElMessage.error('发送消息失败')
       chatStore.setStreaming(false)
+    } finally {
+      isSending.value = false
     }
   }
 

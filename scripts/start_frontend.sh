@@ -3,7 +3,7 @@
 
 set -e
 
-PORT=5173
+PORT=6173
 FRONTEND_DIR="$(dirname "$0")/../src/frontend-vue"
 
 echo "🚀 Starting News Agent frontend..."
@@ -17,11 +17,11 @@ get_port_pid() {
 kill_process() {
     local pid=$1
     if [ -n "$pid" ]; then
-        echo "🔪 Stopping existing process (PID: $pid)..."
+        echo "🔪 Stopping process (PID: $pid)..."
         kill -15 $pid 2>/dev/null || true
         sleep 1
         # If still running, force kill
-        if kill -0 $pid 2>/dev/null; then
+        if kill -0 $pid 2>/dev/null 2>&1; then
             kill -9 $pid 2>/dev/null || true
         fi
     fi
@@ -50,14 +50,23 @@ if [ -n "$PORT_PID" ]; then
 
     # Kill all processes using the port
     for pid in $PORT_PID; do
-        kill_process $pid
+        # Check if it's a Vite process
+        if ps -p $pid -o command= 2>/dev/null | grep -q "vite"; then
+            echo "   → Detected Vite process, stopping..."
+            kill_process $pid
+        else
+            echo "   → Non-Vite process on port $PORT, stopping anyway..."
+            kill_process $pid
+        fi
     done
 
     # Verify port is free
+    sleep 1
     PORT_PID=$(get_port_pid $PORT)
     if [ -n "$PORT_PID" ]; then
         echo "❌ Failed to free port $PORT. Please manually stop the process."
-        echo "   Run: lsof -i :$PORT"
+        echo "   Run: kill $PORT_PID"
+        echo "   Or: lsof -i :$PORT"
         exit 1
     fi
 

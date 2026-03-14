@@ -64,7 +64,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick, onMounted } from 'vue'
+import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElDropdown, ElDropdownMenu, ElDropdownItem, ElIcon } from 'element-plus'
 import { SwitchButton, ChatDotRound, Loading, ArrowDown } from '@element-plus/icons-vue'
@@ -87,7 +87,12 @@ const messagesContainer = ref<HTMLElement>()
 
 // Load conversations on mount
 onMounted(async () => {
+  console.log('[ChatView] ✅ Component mounted')
   await conversationStore.fetchConversations()
+})
+
+onUnmounted(() => {
+  console.log('[ChatView] 🗑️ Component unmounted')
 })
 
 // Auto-scroll to bottom
@@ -102,6 +107,7 @@ watch(
 )
 
 const handleSend = (message: string) => {
+  console.log('[ChatView] 📥 Received send event:', message)
   sendMessage(message)
 }
 

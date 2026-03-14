@@ -22,7 +22,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { ElInput, ElButton } from 'element-plus'
 
 const props = defineProps<{
@@ -36,10 +36,20 @@ const emit = defineEmits<{
 
 const inputMessage = ref('')
 
+// Track component instances
+onMounted(() => {
+  console.log('[ChatInput] ✅ Component mounted')
+})
+
+onUnmounted(() => {
+  console.log('[ChatInput] 🗑️ Component unmounted')
+})
+
 const handleSend = () => {
   const message = inputMessage.value.trim()
   if (!message || props.isStreaming || !props.isConnected) return
 
+  console.log('[ChatInput] 📤 Emitting send event:', message)
   emit('send', message)
   inputMessage.value = ''
 }

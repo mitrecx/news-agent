@@ -8,19 +8,26 @@ import * as ElementPlusIconsVue from '@element-plus/icons-vue'
 import App from './App.vue'
 import router from './router'
 
-const app = createApp(App)
+// Prevent multiple app instances in development (HMR issue)
+const appElement = document.querySelector('#app')
+if (appElement && !appElement.__vue_app__) {
+  const app = createApp(App)
 
-// Create pinia instance with persist plugin
-const pinia = createPinia()
-pinia.use(piniaPluginPersistedstate)
+  // Create pinia instance with persist plugin
+  const pinia = createPinia()
+  pinia.use(piniaPluginPersistedstate)
 
-app.use(pinia)
-app.use(router)
-app.use(ElementPlus)
+  app.use(pinia)
+  app.use(router)
+  app.use(ElementPlus)
 
-// Register all icons
-for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
-  app.component(key, component)
+  // Register all icons
+  for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
+    app.component(key, component)
+  }
+
+  app.mount('#app')
+  console.log('[main.ts] ✅ Vue app mounted')
+} else {
+  console.warn('[main.ts] ⚠️ App already mounted, skipping duplicate mount')
 }
-
-app.mount('#app')
