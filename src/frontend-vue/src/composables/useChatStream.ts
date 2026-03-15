@@ -17,7 +17,6 @@ export function useChatStream() {
   const abortController = ref<AbortController | null>(null)
   const currentResponse = ref('')
   const progressMessage = ref('')
-  const isSending = ref(false) // Track if a message is being sent
 
   // Cleanup on component unmount
   onUnmounted(() => {
@@ -28,7 +27,7 @@ export function useChatStream() {
       abortController.value = null
     }
     // Reset state
-    isSending.value = false
+    chatStore.isSending = false
     currentResponse.value = ''
     progressMessage.value = ''
   })
@@ -36,10 +35,10 @@ export function useChatStream() {
   /** Send message with streaming */
   const sendMessage = async (message: string) => {
     // Prevent duplicate requests
-    if (isSending.value) {
+    if (chatStore.isSending) {
       console.log(`[useChatStream:${instanceId}] ⚠️ Request already in progress, ignoring duplicate send`, {
         message,
-        isSending: isSending.value,
+        isSending: chatStore.isSending,
         isStreaming: chatStore.isStreaming
       })
       return
@@ -64,7 +63,7 @@ export function useChatStream() {
       return
     }
 
-    isSending.value = true
+    chatStore.isSending = true
 
     // Add user message
     chatStore.addMessage({ role: 'user', content: message })
@@ -128,7 +127,7 @@ export function useChatStream() {
       ElMessage.error('发送消息失败')
       chatStore.setStreaming(false)
     } finally {
-      isSending.value = false
+      chatStore.isSending = false
     }
   }
 

@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     # JWT
     jwt_secret: str = "your-secret-key-change-this-in-production"
 
+    # Conversation
+    title_generation_strategy: str = "truncate"  # Options: "ai", "truncate"
+
     class Config:
         env_file = ".env"
         case_sensitive = False

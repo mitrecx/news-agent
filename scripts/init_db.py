@@ -111,7 +111,7 @@ async def init_database():
         else:
             # Create test user
             print("Creating test user...")
-            hashed_password = hash_password("test")
+            hashed_password = hash_password("test123456")
             await conn.execute(
                 """
                 INSERT INTO users (username, email, hashed_password)
@@ -123,7 +123,7 @@ async def init_database():
             )
             print("✓ Test user created")
             print("  Username: test")
-            print("  Password: test")
+            print("  Password: test123456")
 
         print("\n✅ Database initialization completed!")
 

@@ -270,7 +270,6 @@ JWT_SECRET=your-random-secret-key-change-this
 - `users` 表
 - `conversations` 表
 - `messages` 表
-- 默认测试用户（用户名: `test`, 密码: `test`）
 
 ### 5. 构建前端
 
@@ -451,7 +450,6 @@ curl http://localhost:8000/health
 
 使用默认测试账号：
 - 用户名: `test`
-- 密码: `test`
 
 ### 4. 测试对话功能
 

@@ -47,7 +47,7 @@ uv run python run.py
 
 Use the test credentials:
 - Username: `test`
-- Password: `test`
+- Password: `test123456`
 
 ## 📁 Project Structure
 
@@ -161,7 +161,7 @@ No environment variables needed for development. The API proxy handles all backe
 # Test authentication
 curl -X POST http://localhost:8000/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username": "test", "password": "test"}'
+  -d '{"username": "test", "password": "test123456"}'
 
 # Test health endpoint
 curl http://localhost:8000/health

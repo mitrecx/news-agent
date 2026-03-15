@@ -170,8 +170,8 @@ async def get_conversation_messages(
 
 # ========== Helper function to generate conversation title ==========
 
-async def generate_conversation_title(first_message: str, first_response: str) -> str:
-    """Use AI to generate a concise conversation title (max 10 characters)"""
+async def generate_title_with_ai(first_message: str, first_response: str) -> str:
+    """策略1: 使用 AI 生成简洁的对话标题"""
     try:
         # Create a simple prompt for title generation
         prompt = f"""根据以下对话内容，生成一个简洁的标题（不超过10个字）：
@@ -193,9 +193,30 @@ async def generate_conversation_title(first_message: str, first_response: str) -
 
         return title if title else "新对话"
     except Exception as e:
-        logger.error(f"Failed to generate title: {e}")
+        logger.error(f"Failed to generate title with AI: {e}")
         # Fallback to first 15 characters of user message
         return first_message[:15] + ("..." if len(first_message) > 15 else "")
+
+
+def generate_title_by_truncate(first_message: str, first_response: str) -> str:
+    """策略2: 截取用户问题前7个字作为标题"""
+    # Take first 7 characters of user message
+    title = first_message[:7]
+
+    # Add ellipsis if message is longer
+    if len(first_message) > 7:
+        title += "..."
+
+    return title if title else "新对话"
+
+
+async def generate_conversation_title(first_message: str, first_response: str) -> str:
+    """根据配置的策略生成对话标题"""
+    settings = get_settings()
+    if settings.title_generation_strategy == "ai":
+        return await generate_title_with_ai(first_message, first_response)
+    else:  # truncate
+        return generate_title_by_truncate(first_message, first_response)
 
 
 

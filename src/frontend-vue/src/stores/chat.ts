@@ -8,6 +8,7 @@ export const useChatStore = defineStore('chat', () => {
   const isStreaming = ref(false)
   const isConnected = ref(false)
   const conversationId = ref<number | null>(null)
+  const isSending = ref(false)  // Track if a message is being sent (prevent duplicate requests)
 
   /** Actions */
   const addMessage = (message: ChatMessage) => {
@@ -48,6 +49,7 @@ export const useChatStore = defineStore('chat', () => {
     isStreaming,
     isConnected,
     conversationId,
+    isSending,
     addMessage,
     updateLastMessage,
     setStreaming,

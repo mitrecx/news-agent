@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Write"
+    ],
+    "deny": [
+      "Bash(*rm -rf*)",
+      "Bash(*rm --recursive --force*)"
+    ]
+  },
+  "instructionsPath": "CLAUDE.md"
+}
