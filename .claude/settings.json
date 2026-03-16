@@ -4,7 +4,7 @@
       "Read",
       "Write"
     ],
-    "deny": [
+    "ask": [
       "Bash(*rm -rf*)",
       "Bash(*rm --recursive --force*)"
     ]

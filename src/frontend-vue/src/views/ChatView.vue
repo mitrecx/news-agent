@@ -55,8 +55,10 @@
 
       <!-- Input -->
       <ChatInput
+        ref="chatInputRef"
         :is-streaming="chatStore.isStreaming"
         :is-connected="chatStore.isConnected"
+        :messages="chatStore.messages"
         @send="handleSend"
       />
     </div>
@@ -81,14 +83,33 @@ const router = useRouter()
 const authStore = useAuthStore()
 const chatStore = useChatStore()
 const conversationStore = useConversationStore()
-const { sendMessage, progressMessage } = useChatStream()
+const { sendMessage, progressMessage, loadConversation } = useChatStream()
 
 const messagesContainer = ref<HTMLElement>()
+const chatInputRef = ref<InstanceType<typeof ChatInput>>()
 
 // Load conversations on mount
 onMounted(async () => {
   console.log('[ChatView] ✅ Component mounted')
   await conversationStore.fetchConversations()
+
+  // Restore the last selected conversation if exists
+  if (conversationStore.currentConversationId) {
+    const savedId = conversationStore.currentConversationId
+    const exists = conversationStore.conversations.some(c => c.id === savedId)
+
+    if (exists) {
+      console.log('[ChatView] 🔄 Restoring conversation:', savedId)
+      await loadConversation(savedId)
+    } else {
+      console.log('[ChatView] ⚠️ Saved conversation not found, clearing')
+      conversationStore.clearCurrentConversation()
+    }
+  }
+
+  // Auto-focus input after conversation is loaded/restored
+  await nextTick()
+  chatInputRef.value?.focus()
 })
 
 onUnmounted(() => {
@@ -102,6 +123,19 @@ watch(
     await nextTick()
     if (messagesContainer.value) {
       messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+    }
+  }
+)
+
+// Watch for conversation changes to ensure input history is updated
+watch(
+  () => chatStore.conversationId,
+  async (newId, oldId) => {
+    if (newId !== oldId) {
+      console.log('[ChatView] 🔄 Conversation changed from', oldId, 'to', newId)
+      // Auto-focus input after conversation switches
+      await nextTick()
+      chatInputRef.value?.focus()
     }
   }
 )

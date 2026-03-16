@@ -9,6 +9,12 @@ export const useConversationStore = defineStore('conversation', () => {
   const currentConversationId = ref<number | null>(null)
   const isLoading = ref(false)
 
+  // Load current conversation ID from localStorage on initialization
+  const savedConversationId = localStorage.getItem('currentConversationId')
+  if (savedConversationId) {
+    currentConversationId.value = parseInt(savedConversationId, 10)
+  }
+
   /** Computed */
   const currentConversation = computed(() => {
     if (!currentConversationId.value) return null
@@ -32,10 +38,12 @@ export const useConversationStore = defineStore('conversation', () => {
 
   const selectConversation = (id: number) => {
     currentConversationId.value = id
+    localStorage.setItem('currentConversationId', id.toString())
   }
 
   const clearCurrentConversation = () => {
     currentConversationId.value = null
+    localStorage.removeItem('currentConversationId')
   }
 
   const renameConversation = async (id: number, title: string) => {

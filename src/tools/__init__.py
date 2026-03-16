@@ -19,40 +19,48 @@ async def fetch_weibo_hot_search(limit: int = 40) -> str:
         limit: 返回热搜数量，默认40条，最多50条
 
     Returns:
-        格式化的热搜列表
+        格式化的热搜列表（包含描述）
 
-    注意：工具返回结果已经是最终答案，直接原样返回给用户即可。
+    注意：
+    - 描述通过爬取微博详情页内容 + LLM 总结生成
+    - 需要在 .env 中配置 WEIBO_COOKIE 才能生成描述
+    - 描述在后台异步生成，首次请求可能不含描述
+    - 配置 Cookie 请参考: docs/WEIBO_COOKIE_SETUP.md
     """
     if limit < 1:
         limit = 10
     if limit > 50:
         limit = 50
 
-    # 打印日志
     logger.info(f"🔍 开始获取微博热搜，数量限制: {limit}")
-    print(f"\n{'='*60}")
-    print(f"📊 微博热搜工具调用")
-    print(f"{'='*60}")
-    print(f"⏰ 时间: {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print(f"📝 获取数量: {limit} 条")
-    print(f"{'='*60}\n")
 
     scraper = get_scraper()
     try:
-        result = await scraper.get_hot_search_summary(limit)
+        # 获取热搜（描述在后台异步生成）
+        items = await scraper.fetch_hot_search(limit, fetch_descriptions=False)
 
-        # 打印结果日志
-        print(f"✅ 微博热搜获取成功")
-        print(f"{'='*60}")
-        print(result)
-        print(f"{'='*60}\n")
+        # 统计描述状态
+        with_desc = sum(1 for item in items if item.description)
+        logger.info(f"✅ 获取 {len(items)} 条热搜，其中 {with_desc} 条含描述")
 
-        logger.info(f"✅ 成功获取微博热搜，返回 {result.count(chr(10))} 行数据")
+        # 格式化输出
+        lines = ["📊 微博热搜榜：\n"]
+        for item in items:
+            if item.description:
+                lines.append(f"  {item.rank}. {item.title} (热度: {item.hot_value})\n     💡 {item.description}\n")
+            else:
+                lines.append(f"  {item.rank}. {item.title} (热度: {item.hot_value})\n")
+
+        result = "\n".join(lines)
+
+        # 如果有描述正在生成，添加提示
+        if with_desc < len(items):
+            result += "\n\n💡 部分热搜的详细描述正在后台生成中，请稍后刷新查看。"
+
         return result
+
     except Exception as e:
         error_msg = f"获取微博热搜失败: {e}"
-        print(f"❌ {error_msg}")
-        print(f"{'='*60}\n")
         logger.error(error_msg)
         return error_msg
 
