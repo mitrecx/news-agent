@@ -15,6 +15,7 @@ from ..tools import fetch_weibo_hot_search
 from ..auth import db, router as auth_router, get_current_user
 from ..auth.models import User, Conversation, ConversationUpdate
 from ..auth.conversation_service import ConversationService
+from ..tools.weibo_cache import WeiboHotSearchCache
 
 # 配置日志
 logging.basicConfig(
@@ -85,6 +86,77 @@ async def test_weibo_tool():
         return {"status": "ok", "result": result}
     except Exception as e:
         return {"status": "error", "error": str(e)}
+
+
+# ========== Real-time Weibo Hot Search Endpoints ==========
+
+@app.get("/api/weibo/hot")
+async def get_weibo_hot_search(
+    limit: int = 50,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get real-time weibo hot search (not from cache, live data)
+
+    Args:
+        limit: Number of hot search items to return (default: 50)
+        current_user: Authenticated user
+
+    Returns:
+        List of hot search items with ranking, title, description, and metrics
+    """
+    try:
+        # Use ainvoke for async tool invocation
+        result = await fetch_weibo_hot_search.ainvoke({"limit": limit})
+
+        # Parse the result to extract structured data
+        # The result is a formatted string, so we need to parse it
+        lines = result.strip().split('\n')
+        items = []
+
+        for line in lines:
+            line = line.strip()
+            if not line or line.startswith('=') or line.startswith('[') or line.startswith('✅'):
+                continue
+
+            # Try to parse format like "1. 热搜标题 (热度: 热)"
+            if line[0].isdigit() and '. ' in line:
+                # Remove leading number and dot
+                content = line.split('. ', 1)[1].strip()
+
+                # Extract metrics from parentheses if present
+                metrics = None
+                title = content
+
+                if ' (热度: ' in content:
+                    title_part, metrics_part = content.split(' (热度: ', 1)
+                    title = title_part.strip()
+                    # Remove trailing parenthesis
+                    metrics = metrics_part.rstrip(')')
+
+                # Extract rank
+                rank_str = line.split('. ')[0]
+                try:
+                    rank = int(rank_str)
+                except ValueError:
+                    continue
+
+                items.append({
+                    "rank": rank,
+                    "title": title,
+                    "description": "",
+                    "metrics": metrics,
+                })
+
+        return {
+            "items": items,
+            "total": len(items),
+            "limit": limit,
+            "raw": result  # Include raw text for reference
+        }
+    except Exception as e:
+        logger.error(f"Failed to fetch weibo hot search: {e}")
+        raise HTTPException(status_code=500, detail=f"获取微博热搜失败: {str(e)}")
 
 
 # ========== Conversation Management Endpoints ==========
@@ -166,6 +238,102 @@ async def get_conversation_messages(
                 for msg in messages
             ]
         }
+
+
+# ========== Weibo Hot Search Cache Endpoints ==========
+
+@app.get("/api/weibo/cache")
+async def get_weibo_cache(
+    limit: int = 50,
+    offset: int = 0,
+    search: str = None,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get weibo hot search cache entries
+
+    Args:
+        limit: Number of entries to return (default: 50)
+        offset: Offset for pagination (default: 0)
+        search: Search query to filter by title (optional)
+        current_user: Authenticated user
+    """
+    cache = WeiboHotSearchCache(pool=db.pool)
+
+    async with db.pool.acquire() as conn:
+        if search:
+            # Search by title
+            query = """
+                SELECT title_hash, title, description, description_source,
+                       created_at, updated_at, expires_at
+                FROM weibo_hot_search_cache
+                WHERE title ILIKE $1
+                ORDER BY created_at DESC
+                LIMIT $2 OFFSET $3
+            """
+            rows = await conn.fetch(query, f"%{search}%", limit, offset)
+        else:
+            # Get all entries
+            query = """
+                SELECT title_hash, title, description, description_source,
+                       created_at, updated_at, expires_at
+                FROM weibo_hot_search_cache
+                ORDER BY created_at DESC
+                LIMIT $1 OFFSET $2
+            """
+            rows = await conn.fetch(query, limit, offset)
+
+        # Get total count
+        if search:
+            count_query = "SELECT COUNT(*) FROM weibo_hot_search_cache WHERE title ILIKE $1"
+            total_count = await conn.fetchval(count_query, f"%{search}%")
+        else:
+            count_query = "SELECT COUNT(*) FROM weibo_hot_search_cache"
+            total_count = await conn.fetchval(count_query)
+
+        return {
+            "items": [
+                {
+                    "title_hash": row["title_hash"],
+                    "title": row["title"],
+                    "description": row["description"],
+                    "description_source": row["description_source"],
+                    "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                    "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+                    "expires_at": row["expires_at"].isoformat() if row["expires_at"] else None,
+                }
+                for row in rows
+            ],
+            "total": total_count,
+            "limit": limit,
+            "offset": offset,
+        }
+
+
+@app.get("/api/weibo/cache/stats")
+async def get_weibo_cache_stats(current_user: User = Depends(get_current_user)):
+    """
+    Get weibo hot search cache statistics
+
+    Args:
+        current_user: Authenticated user
+    """
+    cache = WeiboHotSearchCache(pool=db.pool)
+    stats = await cache.get_stats()
+    return stats
+
+
+@app.delete("/api/weibo/cache/expired")
+async def delete_expired_cache(current_user: User = Depends(get_current_user)):
+    """
+    Delete expired cache entries
+
+    Args:
+        current_user: Authenticated user
+    """
+    cache = WeiboHotSearchCache(pool=db.pool)
+    deleted_count = await cache.delete_expired()
+    return {"message": f"Deleted {deleted_count} expired cache entries", "count": deleted_count}
 
 
 # ========== Helper function to generate conversation title ==========

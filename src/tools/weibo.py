@@ -5,6 +5,7 @@ from typing import List
 from dataclasses import dataclass
 import asyncio
 import logging
+import os
 
 import httpx
 from bs4 import BeautifulSoup
@@ -154,6 +155,7 @@ class WeiboScraper:
 
         # 自动下载并使用 ChromeDriver
         logger.info("📦 安装 ChromeDriver...")
+        service = None
         try:
             service = Service(ChromeDriverManager().install())
             logger.info("✅ ChromeDriver 安装成功")
@@ -162,6 +164,7 @@ class WeiboScraper:
             raise Exception(f"ChromeDriver 安装失败: {e}")
 
         logger.info("🚀 启动 Chrome 浏览器...")
+        driver = None
         try:
             driver = webdriver.Chrome(service=service, options=chrome_options)
             logger.info("✅ Chrome 浏览器启动成功")
@@ -201,7 +204,38 @@ class WeiboScraper:
 
         finally:
             logger.info("🧹 关闭浏览器")
-            driver.quit()
+            # 强制清理所有 Chrome 和 ChromeDriver 进程
+            if driver:
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+            # 额外清理：确保 Service 进程被终止
+            if service:
+                try:
+                    service.stop()
+                except Exception:
+                    pass
+            # 强制清理残留的 Chrome 进程
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ["ps", "aux"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                for line in result.stdout.split('\n'):
+                    if 'chromedriver' in line and '--headless' in line:
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            try:
+                                pid = int(parts[1])
+                                os.kill(pid, 9)  # SIGKILL
+                            except (ValueError, ProcessLookupError, OSError):
+                                pass
+            except Exception:
+                pass
 
     def _parse_hot_search(self, html: str, limit: int) -> List[HotSearchItem]:
         """
@@ -263,8 +297,23 @@ class WeiboScraper:
 
                 title = link.get_text(strip=True)
                 url = link.get("href", "")
-                if url and not url.startswith("http"):
-                    url = "https://s.weibo.com" + url
+
+                # 验证和清理 URL
+                if url:
+                    # 跳过无效的 URL (javascript:, mailto:, #, etc.)
+                    if url.startswith(("javascript:", "mailto:", "#", "void")):
+                        # 构建默认的话题搜索 URL
+                        from urllib.parse import quote
+                        encoded_title = quote(f"#{title}#")
+                        url = f"https://s.weibo.com/weibo?q={encoded_title}"
+                    elif not url.startswith("http"):
+                        # 相对路径，添加域名
+                        url = "https://s.weibo.com" + url
+                else:
+                    # 没有 URL，构建默认搜索链接
+                    from urllib.parse import quote
+                    encoded_title = quote(f"#{title}#")
+                    url = f"https://s.weibo.com/weibo?q={encoded_title}"
 
                 # 解析热度值
                 hot_value = ""
@@ -374,13 +423,13 @@ class WeiboScraper:
             logger.warning(f"未知的链接类型: {url}")
             return ""
 
-    async def _fetch_topic_page(self, url: str, max_retries: int = 2) -> str:
+    async def _fetch_topic_page(self, url: str, max_retries: int = 3) -> str:
         """
         爬取话题搜索页面
 
         Args:
             url: 话题搜索页 URL
-            max_retries: 最大重试次数
+            max_retries: 最大重试次数（默认3次）
 
         Returns:
             提取的微博内容
@@ -398,7 +447,7 @@ class WeiboScraper:
                 loop = asyncio.get_event_loop()
                 result = await asyncio.wait_for(
                     loop.run_in_executor(None, self._fetch_topic_page_sync, url),
-                    timeout=30.0
+                    timeout=45.0  # 增加超时到45秒
                 )
                 return result
             except asyncio.TimeoutError:
@@ -439,6 +488,7 @@ class WeiboScraper:
         chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36')
 
         driver = None
+        service = None
         try:
             service = Service(ChromeDriverManager().install())
             driver = webdriver.Chrome(service=service, options=chrome_options)
@@ -520,8 +570,39 @@ class WeiboScraper:
             logger.error(f"爬取话题页失败: {e}")
             return ""
         finally:
+            # 强制清理所有 Chrome 和 ChromeDriver 进程
             if driver:
-                driver.quit()
+                try:
+                    driver.quit()
+                except Exception:
+                    pass
+            # 额外清理：确保 Service 进程被终止
+            if service:
+                try:
+                    service.stop()
+                except Exception:
+                    pass
+            # 强制清理残留的 Chrome 进程（仅当前会话创建的）
+            try:
+                import subprocess
+                # 查找并杀死 chromedriver 进程（限制为最近1分钟创建的）
+                result = subprocess.run(
+                    ["ps", "aux"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                for line in result.stdout.split('\n'):
+                    if 'chromedriver' in line and '--headless' in line:
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            try:
+                                pid = int(parts[1])
+                                os.kill(pid, 9)  # SIGKILL
+                            except (ValueError, ProcessLookupError, OSError):
+                                pass
+            except Exception:
+                pass
 
     async def _fetch_weibo_post(self, url: str) -> str:
         """
@@ -752,7 +833,8 @@ class WeiboScraper:
         print("=" * 60)
 
         # 控制并发数（避免过载）
-        semaphore = asyncio.Semaphore(2)
+        # 使用串行执行（并发=1）以避免 ChromeDriver 连接冲突
+        semaphore = asyncio.Semaphore(1)
 
         # 限制生成数量
         items_to_process = items[:50]  # 最多50条
@@ -782,22 +864,34 @@ class WeiboScraper:
 
                         print(f"  ✓ {description[:60]}...")
                     else:
-                        # 如果没有获取到内容，使用降级方案
-                        logger.warning(f"未获取到微博内容，使用标题: {item.title}")
-                        item.description = f"微博热门话题：{item.title}"
-                        item.description_source = "fallback"
+                        # 如果没有获取到内容，使用基于标题的 LLM 推断
+                        logger.warning(f"未获取到微博内容，使用标题推断: {item.title}")
+                        from .llm_summary import summarize_from_title
+                        description = await summarize_from_title(item.title)
+                        item.description = description
+                        item.description_source = "inferred"
 
-                        # ✅ 保存降级描述到缓存
+                        # ✅ 保存推断描述到缓存
                         await self._cache_manager.set(
                             title=item.title,
-                            description=item.description,
-                            description_source="fallback"
+                            description=description,
+                            description_source="inferred"
                         )
+
+                        print(f"  ⚠ {description[:60]}...")
 
                 except Exception as e:
                     logger.warning(f"  ✗ 失败: {item.title}, 错误: {e}")
-                    item.description = f"微博热门话题：{item.title}"
-                    item.description_source = "error"
+                    # 使用基于标题的推断作为降级方案
+                    try:
+                        from .llm_summary import summarize_from_title
+                        description = await summarize_from_title(item.title)
+                        item.description = description
+                        item.description_source = "error_inferred"
+                    except Exception:
+                        # 如果推断也失败，使用简单降级
+                        item.description = f"微博热门话题：{item.title}"
+                        item.description_source = "error"
 
                 # 避免请求过快
                 await asyncio.sleep(1.0)

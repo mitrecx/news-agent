@@ -14,6 +14,16 @@ const router = createRouter({
       component: () => import('@/views/LoginView.vue'),
       meta: { requiresAuth: false },
     },
+    {
+      path: '/hot-search',
+      component: () => import('@/views/HotSearchView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/weibo-cache',
+      component: () => import('@/views/WeiboCacheView.vue'),
+      meta: { requiresAuth: true },
+    },
   ],
 })
 

@@ -11,8 +11,8 @@ logger = logging.getLogger(__name__)
 class WeiboHotSearchCache:
     """微博热搜描述缓存管理器"""
 
-    # 缓存有效期：8小时
-    CACHE_TTL = timedelta(hours=8)
+    # 缓存有效期：永久（100年）
+    CACHE_TTL = timedelta(days=365*100)  # 永久缓存
 
     def __init__(self, pool=None):
         """
@@ -107,20 +107,6 @@ class WeiboHotSearchCache:
 
             logger.debug(f"✗ Cache miss: {title[:30]}...")
             return None
-
-        if row:
-            logger.debug(f"✓ Cache hit: {title[:30]}...")
-            return {
-                'title': row['title'],
-                'description': row['description'],
-                'description_source': row['description_source'],
-                'created_at': row['created_at'],
-                'updated_at': row['updated_at'],
-                'expires_at': row['expires_at'],
-            }
-
-        logger.debug(f"✗ Cache miss: {title[:30]}...")
-        return None
 
     async def set(
         self,
