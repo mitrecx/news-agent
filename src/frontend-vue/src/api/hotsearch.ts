@@ -1,22 +1,31 @@
 import request from '@/utils/request'
 
-/** 实时热搜条目 */
-export interface HotSearchItem {
-  rank: number
+/** 热搜缓存条目 */
+export interface HotSearchCacheItem {
+  title_hash: string
   title: string
   description: string
-  metrics?: any
+  description_source: string
+  created_at: string
+  updated_at: string
+  expires_at: string
 }
 
-/** 热搜响应 */
-export interface HotSearchResponse {
-  items: HotSearchItem[]
+/** 热搜缓存响应 */
+export interface HotSearchCacheResponse {
+  items: HotSearchCacheItem[]
   total: number
   limit: number
-  raw: string
+  offset: number
 }
 
-/** 获取实时微博热搜 */
-export const getWeiboHotSearch = (params: { limit?: number }) => {
-  return request.get<HotSearchResponse>('/weibo/hot', { params })
+/** 获取微博热搜缓存（支持时间范围和模糊搜索） */
+export const getWeiboHotSearchCache = (params: {
+  limit?: number
+  offset?: number
+  search?: string
+  start_date?: string
+  end_date?: string
+}) => {
+  return request.get<HotSearchCacheResponse>('/weibo/cache', { params })
 }

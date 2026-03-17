@@ -6,6 +6,11 @@ const router = createRouter({
   routes: [
     {
       path: '/',
+      component: () => import('@/views/HomeView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/chat',
       component: () => import('@/views/ChatView.vue'),
       meta: { requiresAuth: true },
     },
@@ -17,11 +22,6 @@ const router = createRouter({
     {
       path: '/hot-search',
       component: () => import('@/views/HotSearchView.vue'),
-      meta: { requiresAuth: true },
-    },
-    {
-      path: '/weibo-cache',
-      component: () => import('@/views/WeiboCacheView.vue'),
       meta: { requiresAuth: true },
     },
   ],

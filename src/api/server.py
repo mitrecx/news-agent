@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from contextlib import asynccontextmanager
+from datetime import datetime
 import os
 import json
 import logging
@@ -244,52 +245,67 @@ async def get_conversation_messages(
 
 @app.get("/api/weibo/cache")
 async def get_weibo_cache(
-    limit: int = 50,
+    limit: int = 15,
     offset: int = 0,
     search: str = None,
+    start_date: str = None,
+    end_date: str = None,
     current_user: User = Depends(get_current_user)
 ):
     """
-    Get weibo hot search cache entries
+    Get weibo hot search cache entries with filtering
 
     Args:
-        limit: Number of entries to return (default: 50)
+        limit: Number of entries to return (default: 15)
         offset: Offset for pagination (default: 0)
-        search: Search query to filter by title (optional)
+        search: Search query to filter by title (optional, fuzzy search)
+        start_date: Start date for filtering updated_at (ISO format, optional)
+        end_date: End date for filtering updated_at (ISO format, optional)
         current_user: Authenticated user
     """
     cache = WeiboHotSearchCache(pool=db.pool)
 
     async with db.pool.acquire() as conn:
+        # Build WHERE conditions
+        conditions = []
+        params = []
+        param_count = 0
+
         if search:
-            # Search by title
-            query = """
-                SELECT title_hash, title, description, description_source,
-                       created_at, updated_at, expires_at
-                FROM weibo_hot_search_cache
-                WHERE title ILIKE $1
-                ORDER BY created_at DESC
-                LIMIT $2 OFFSET $3
-            """
-            rows = await conn.fetch(query, f"%{search}%", limit, offset)
-        else:
-            # Get all entries
-            query = """
-                SELECT title_hash, title, description, description_source,
-                       created_at, updated_at, expires_at
-                FROM weibo_hot_search_cache
-                ORDER BY created_at DESC
-                LIMIT $1 OFFSET $2
-            """
-            rows = await conn.fetch(query, limit, offset)
+            param_count += 1
+            conditions.append(f"title ILIKE ${param_count}")
+            params.append(f"%{search}%")
+
+        if start_date:
+            param_count += 1
+            # Parse ISO format string to datetime object
+            start_dt = datetime.fromisoformat(start_date)
+            conditions.append(f"updated_at >= ${param_count}")
+            params.append(start_dt)
+
+        if end_date:
+            param_count += 1
+            # Parse ISO format string to datetime object
+            end_dt = datetime.fromisoformat(end_date)
+            conditions.append(f"updated_at <= ${param_count}")
+            params.append(end_dt)
+
+        where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        # Get entries with filters
+        query = f"""
+            SELECT title_hash, title, description, description_source,
+                   created_at, updated_at, expires_at
+            FROM weibo_hot_search_cache
+            {where_clause}
+            ORDER BY updated_at DESC
+            LIMIT ${param_count + 1} OFFSET ${param_count + 2}
+        """
+        rows = await conn.fetch(query, *params, limit, offset)
 
         # Get total count
-        if search:
-            count_query = "SELECT COUNT(*) FROM weibo_hot_search_cache WHERE title ILIKE $1"
-            total_count = await conn.fetchval(count_query, f"%{search}%")
-        else:
-            count_query = "SELECT COUNT(*) FROM weibo_hot_search_cache"
-            total_count = await conn.fetchval(count_query)
+        count_query = f"SELECT COUNT(*) FROM weibo_hot_search_cache {where_clause}"
+        total_count = await conn.fetchval(count_query, *params)
 
         return {
             "items": [

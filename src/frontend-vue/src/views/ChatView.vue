@@ -20,13 +20,13 @@
             </div>
             <template #dropdown>
               <el-dropdown-menu>
+                <el-dropdown-item @click="handleNavigateToHome">
+                  <el-icon><HomeFilled /></el-icon>
+                  返回首页
+                </el-dropdown-item>
                 <el-dropdown-item @click="handleNavigateToHotSearch">
                   <el-icon><TrendCharts /></el-icon>
                   热搜查询
-                </el-dropdown-item>
-                <el-dropdown-item @click="handleNavigateToCache">
-                  <el-icon><Document /></el-icon>
-                  热搜缓存
                 </el-dropdown-item>
                 <el-dropdown-item @click="handleLogout" divided>
                   <el-icon><SwitchButton /></el-icon>
@@ -77,7 +77,7 @@
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElDropdown, ElDropdownMenu, ElDropdownItem, ElIcon } from 'element-plus'
-import { SwitchButton, ChatDotRound, Loading, ArrowDown, Document, TrendCharts } from '@element-plus/icons-vue'
+import { SwitchButton, ChatDotRound, Loading, ArrowDown, TrendCharts, HomeFilled } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
 import { useConversationStore } from '@/stores/conversation'
@@ -160,12 +160,12 @@ const handleLogout = () => {
   router.push('/login')
 }
 
-const handleNavigateToCache = () => {
-  router.push('/weibo-cache')
-}
-
 const handleNavigateToHotSearch = () => {
   router.push('/hot-search')
+}
+
+const handleNavigateToHome = () => {
+  router.push('/')
 }
 
 // Start health check

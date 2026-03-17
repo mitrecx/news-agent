@@ -1,106 +1,201 @@
 <template>
   <div class="hot-search-view">
-    <div class="page-header">
-      <div class="header-content">
-        <h1>微博热搜</h1>
-        <p class="subtitle">实时微博热搜数据（直接查询，不经过大模型处理）</p>
-      </div>
-      <div class="header-actions">
-        <el-button type="primary" @click="fetchHotSearch" :loading="loading" :icon="Refresh">
-          刷新数据
+    <div class="top-nav">
+      <div class="nav-content">
+        <el-button link @click="router.push('/')">
+          <el-icon><ArrowLeft /></el-icon>
+          返回首页
         </el-button>
-        <el-select v-model="limit" @change="handleLimitChange" style="width: 120px; margin-left: 12px">
-          <el-option label="20 条" :value="20" />
-          <el-option label="50 条" :value="50" />
-          <el-option label="100 条" :value="100" />
-        </el-select>
+        <div class="user-menu">
+          <el-dropdown trigger="click">
+            <div class="user-dropdown">
+              <div class="user-avatar">{{ authStore.user?.username?.charAt(0).toUpperCase() || '?' }}</div>
+              <span>{{ authStore.user?.username }}</span>
+              <el-icon><ArrowDown /></el-icon>
+            </div>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item @click="router.push('/chat')">
+                  <el-icon><ChatDotRound /></el-icon>
+                  智能对话
+                </el-dropdown-item>
+                <el-dropdown-item @click="handleLogout" divided>
+                  <el-icon><SwitchButton /></el-icon>
+                  退出登录
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+        </div>
       </div>
     </div>
 
-    <!-- 统计卡片 -->
-    <div class="stats-section">
-      <el-card class="stat-card">
-        <div class="stat-item">
-          <div class="stat-value">{{ totalItems }}</div>
-          <div class="stat-label">热搜条数</div>
-        </div>
-      </el-card>
-      <el-card class="stat-card">
-        <div class="stat-item">
-          <div class="stat-value" :class="{ 'status-active': !loading, 'status-loading': loading }">
-            {{ loading ? '加载中' : '实时数据' }}
-          </div>
-          <div class="stat-label">数据状态</div>
-        </div>
-      </el-card>
-      <el-card class="stat-card">
-        <div class="stat-item">
-          <div class="stat-value">{{ lastUpdateTime }}</div>
-          <div class="stat-label">最后更新</div>
-        </div>
-      </el-card>
-    </div>
+    <!-- 数据表格 -->
+    <el-card class="table-card">
+      <template #header>
+        <el-form :inline="true" :model="filters" class="filter-form">
+          <el-form-item label="标题搜索">
+            <el-input
+              v-model="filters.search"
+              placeholder="输入关键词搜索标题"
+              clearable
+              style="width: 240px"
+              @clear="handleSearch"
+              @keyup.enter="handleSearch"
+            >
+              <template #prefix>
+                <el-icon><Search /></el-icon>
+              </template>
+            </el-input>
+          </el-form-item>
 
-    <!-- 热搜列表 -->
-    <div class="hot-search-list">
-      <el-empty v-if="!loading && hotSearchItems.length === 0" description="暂无热搜数据" />
+          <el-form-item label="更新时间">
+            <el-date-picker
+              v-model="dateRange"
+              type="daterange"
+              range-separator="至"
+              start-placeholder="开始日期"
+              end-placeholder="结束日期"
+              value-format="YYYY-MM-DD HH:mm:ss"
+              @change="handleDateRangeChange"
+              style="width: 320px"
+            />
+          </el-form-item>
 
-      <transition-group name="list" tag="div" class="items-container">
-        <el-card
-          v-for="item in hotSearchItems"
-          :key="item.rank"
-          class="hot-search-card"
-          :class="`rank-${item.rank <= 3 ? item.rank : 'normal'}`"
-          shadow="hover"
-        >
-          <div class="card-content">
-            <div class="rank-badge" :class="`rank-${item.rank <= 3 ? item.rank : 'normal'}`">
-              {{ item.rank }}
+          <el-form-item>
+            <el-button type="primary" @click="handleSearch" :icon="Search">
+              查询
+            </el-button>
+            <el-button @click="handleReset" :icon="RefreshLeft">
+              重置
+            </el-button>
+          </el-form-item>
+        </el-form>
+      </template>
+
+      <el-table
+        :data="cacheItems"
+        v-loading="loading"
+        stripe
+        class="hot-search-table"
+        :default-sort="{ prop: 'updated_at', order: 'descending' }"
+      >
+        <el-table-column type="index" label="#" width="60" :index="indexMethod" />
+
+        <el-table-column prop="title" label="热搜标题" min-width="200" show-overflow-tooltip>
+          <template #default="{ row }">
+            <div class="title-cell">
+              <el-tag v-if="row.description_source === 'weibo_detail'" size="small" type="success" style="margin-right: 8px">
+                微博
+              </el-tag>
+              <el-tag v-else-if="row.description_source === 'llm'" size="small" type="warning" style="margin-right: 8px">
+                AI
+              </el-tag>
+              <el-tag v-else size="small" type="info" style="margin-right: 8px">
+                其他
+              </el-tag>
+              {{ row.title }}
             </div>
-            <div class="item-content">
-              <h3 class="item-title">{{ item.title }}</h3>
-              <p v-if="item.description" class="item-description">
-                {{ item.description }}
-              </p>
-            </div>
-          </div>
-        </el-card>
-      </transition-group>
-    </div>
+          </template>
+        </el-table-column>
 
-    <!-- 加载状态 -->
-    <div v-if="loading" class="loading-section">
-      <el-skeleton :rows="5" animated />
-    </div>
+        <el-table-column prop="description" label="描述" min-width="300" show-overflow-tooltip popper-class="description-tooltip">
+          <template #default="{ row }">
+            <span class="description-cell">{{ row.description || '-' }}</span>
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="created_at" label="创建时间" width="180">
+          <template #default="{ row }">
+            {{ formatDateTime(row.created_at) }}
+          </template>
+        </el-table-column>
+
+        <el-table-column prop="updated_at" label="更新时间" width="180" sortable>
+          <template #default="{ row }">
+            {{ formatDateTime(row.updated_at) }}
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <!-- 分页 -->
+      <div class="pagination-section">
+        <el-pagination
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :total="total"
+          :page-sizes="[15, 30, 50, 100]"
+          layout="total, sizes, prev, pager, next, jumper"
+          @current-change="handlePageChange"
+          @size-change="handleSizeChange"
+        />
+      </div>
+    </el-card>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Refresh } from '@element-plus/icons-vue'
-import { getWeiboHotSearch, type HotSearchItem } from '@/api/hotsearch'
+import { Search, RefreshLeft, ArrowLeft, ArrowDown, ChatDotRound, SwitchButton } from '@element-plus/icons-vue'
+import { useAuthStore } from '@/stores/auth'
+import { getWeiboHotSearchCache, type HotSearchCacheItem } from '@/api/hotsearch'
+
+const router = useRouter()
+const authStore = useAuthStore()
 
 // 数据
-const hotSearchItems = ref<HotSearchItem[]>([])
+const cacheItems = ref<HotSearchCacheItem[]>([])
 const loading = ref(false)
-const limit = ref(50)
-const totalItems = ref(0)
-const lastUpdateTime = ref('-')
+const total = ref(0)
+const currentPage = ref(1)
+const pageSize = ref(15)
 
-// 获取热搜数据
-const fetchHotSearch = async () => {
+// 过滤条件
+const filters = ref({
+  search: '',
+  start_date: undefined as string | undefined,
+  end_date: undefined as string | undefined,
+})
+const dateRange = ref<[string, string] | null>(null)
+
+// 索引方法
+const indexMethod = (index: number) => {
+  return (currentPage.value - 1) * pageSize.value + index + 1
+}
+
+// 格式化日期时间
+const formatDateTime = (dateStr: string) => {
+  if (!dateStr) return '-'
+  const date = new Date(dateStr)
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
+}
+
+// 获取缓存数据
+const fetchCache = async () => {
   loading.value = true
   try {
-    const response = await getWeiboHotSearch({ limit: limit.value })
-    hotSearchItems.value = response.data.items
-    totalItems.value = response.data.total
+    const response = await getWeiboHotSearchCache({
+      limit: pageSize.value,
+      offset: (currentPage.value - 1) * pageSize.value,
+      search: filters.value.search || undefined,
+      start_date: filters.value.start_date,
+      end_date: filters.value.end_date,
+    })
+    cacheItems.value = response.data.items
+    total.value = response.data.total
 
-    // 更新时间
-    const now = new Date()
-    lastUpdateTime.value = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`
-
-    ElMessage.success(`成功获取 ${totalItems.value} 条热搜数据`)
+    if (response.data.items.length === 0) {
+      ElMessage.info('未找到匹配的数据')
+    }
   } catch (error: any) {
     ElMessage.error(error.message || '获取热搜数据失败')
     console.error('获取热搜数据失败:', error)
@@ -109,227 +204,191 @@ const fetchHotSearch = async () => {
   }
 }
 
-// 处理限制数量变化
-const handleLimitChange = () => {
-  fetchHotSearch()
+// 处理搜索
+const handleSearch = () => {
+  currentPage.value = 1
+  fetchCache()
+}
+
+// 处理重置
+const handleReset = () => {
+  filters.value = {
+    search: '',
+    start_date: undefined,
+    end_date: undefined,
+  }
+  dateRange.value = null
+  currentPage.value = 1
+  fetchCache()
+}
+
+// 处理日期范围变化
+const handleDateRangeChange = (value: [string, string] | null) => {
+  if (value && value.length === 2) {
+    filters.value.start_date = value[0]
+    filters.value.end_date = value[1]
+  } else {
+    filters.value.start_date = undefined
+    filters.value.end_date = undefined
+  }
+}
+
+// 处理分页变化
+const handlePageChange = () => {
+  fetchCache()
+}
+
+const handleSizeChange = () => {
+  currentPage.value = 1
+  fetchCache()
+}
+
+// 退出登录
+const handleLogout = () => {
+  authStore.logout()
+  router.push('/login')
+  ElMessage.success('已退出登录')
 }
 
 // 初始化
 onMounted(() => {
-  fetchHotSearch()
+  // 设置默认日期范围为今天
+  const today = new Date()
+  const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0)
+  const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59)
+
+  const formatDate = (date: Date) => {
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    const hours = String(date.getHours()).padStart(2, '0')
+    const minutes = String(date.getMinutes()).padStart(2, '0')
+    const seconds = String(date.getSeconds()).padStart(2, '0')
+    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`
+  }
+
+  dateRange.value = [formatDate(startOfDay), formatDate(endOfDay)]
+  filters.value.start_date = formatDate(startOfDay)
+  filters.value.end_date = formatDate(endOfDay)
+
+  fetchCache()
 })
 </script>
 
 <style scoped>
 .hot-search-view {
+  min-height: 100vh;
+  background: #f5f7fa;
   padding: 24px;
-  max-width: 1200px;
+}
+
+.top-nav {
+  background: white;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 12px 24px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  margin: -24px -24px 0 -24px;
+}
+
+.nav-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  max-width: 1400px;
   margin: 0 auto;
 }
 
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 24px;
-}
-
-.header-content h1 {
-  font-size: 28px;
-  margin: 0 0 8px 0;
-  font-weight: 600;
-  color: #303133;
-}
-
-.subtitle {
-  margin: 0;
-  font-size: 14px;
-  color: #909399;
-}
-
-.header-actions {
+.user-dropdown {
   display: flex;
   align-items: center;
-}
-
-.stats-section {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
-  margin-bottom: 24px;
-}
-
-.stat-card {
-  text-align: center;
-}
-
-.stat-item {
-  padding: 8px;
-}
-
-.stat-value {
-  font-size: 32px;
-  font-weight: 600;
-  color: #409eff;
-  margin-bottom: 8px;
-}
-
-.stat-value.status-active {
-  color: #67c23a;
-}
-
-.stat-value.status-loading {
-  color: #909399;
-  font-size: 24px;
-}
-
-.stat-label {
-  font-size: 14px;
-  color: #909399;
-}
-
-.hot-search-list {
-  min-height: 200px;
-}
-
-.items-container {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.hot-search-card {
-  transition: all 0.3s ease;
-}
-
-.hot-search-card.rank-1 {
-  border-left: 4px solid #f56c6c;
-  background: linear-gradient(to right, #fef0f0, #ffffff);
-}
-
-.hot-search-card.rank-2 {
-  border-left: 4px solid #e6a23c;
-  background: linear-gradient(to right, #fdf6ec, #ffffff);
-}
-
-.hot-search-card.rank-3 {
-  border-left: 4px solid #409eff;
-  background: linear-gradient(to right, #ecf5ff, #ffffff);
-}
-
-.card-content {
-  display: flex;
-  gap: 16px;
-  align-items: flex-start;
-}
-
-.rank-badge {
-  flex-shrink: 0;
-  width: 40px;
-  height: 40px;
+  gap: 8px;
+  cursor: pointer;
+  padding: 6px 12px;
   border-radius: 8px;
+  transition: background 0.2s;
+  color: #374151;
+}
+
+.user-dropdown:hover {
+  background: #f3f4f6;
+}
+
+.user-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 18px;
-  font-weight: 600;
-  color: #ffffff;
-  background: #909399;
+  font-size: 13px;
+  font-weight: 500;
+  flex-shrink: 0;
 }
 
-.rank-badge.rank-1 {
-  background: linear-gradient(135deg, #f56c6c, #ff8787);
+.table-card {
+  max-width: 1400px;
 }
 
-.rank-badge.rank-2 {
-  background: linear-gradient(135deg, #e6a23c, #f0b857);
-}
-
-.rank-badge.rank-3 {
-  background: linear-gradient(135deg, #409eff, #66b1ff);
-}
-
-.rank-badge.rank-normal {
-  background: #909399;
-}
-
-.item-content {
-  flex: 1;
-  min-width: 0;
-}
-
-.item-title {
-  margin: 0 0 8px 0;
-  font-size: 18px;
-  font-weight: 600;
-  color: #303133;
-  line-height: 1.5;
-}
-
-.item-description {
+.filter-form {
   margin: 0;
-  font-size: 14px;
+}
+
+.hot-search-table {
+  width: 100%;
+}
+
+.title-cell {
+  display: flex;
+  align-items: center;
+}
+
+.description-cell {
   color: #606266;
   line-height: 1.6;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
-.loading-section {
-  padding: 20px 0;
-}
-
-/* 列表动画 */
-.list-enter-active,
-.list-leave-active {
-  transition: all 0.5s ease;
-}
-
-.list-enter-from {
-  opacity: 0;
-  transform: translateY(-30px);
-}
-
-.list-leave-to {
-  opacity: 0;
-  transform: translateY(30px);
+.pagination-section {
+  display: flex;
+  justify-content: center;
+  padding: 20px 0 0 0;
 }
 
 /* 响应式 */
 @media (max-width: 768px) {
-  .page-header {
-    flex-direction: column;
-    gap: 16px;
+  .hot-search-view {
+    padding: 16px;
   }
 
-  .header-actions {
+  .top-nav {
+    margin: -16px -16px 16px -16px;
+  }
+
+  .filter-form {
+    flex-direction: column;
+  }
+
+  .filter-form .el-form-item {
     width: 100%;
-    justify-content: flex-start;
+    margin-right: 0;
   }
 
   .stats-section {
     grid-template-columns: 1fr;
   }
+}
 
-  .card-content {
-    gap: 12px;
-  }
+/* 描述列tooltip样式限制 */
+:deep(.el-tooltip__popper) {
+  max-width: 500px !important;
+  word-wrap: break-word !important;
+  word-break: break-word !important;
+}
 
-  .rank-badge {
-    width: 32px;
-    height: 32px;
-    font-size: 14px;
-  }
-
-  .item-title {
-    font-size: 16px;
-  }
-
-  .item-description {
-    font-size: 13px;
-  }
+:deep(.el-popper.el-tooltip) {
+  max-width: 500px !important;
 }
 </style>
