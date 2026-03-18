@@ -267,3 +267,75 @@ class WeiboHotSearchCache:
             """)
 
             return dict(stats)
+
+    async def exists(self, title: str) -> bool:
+        """
+        检查热搜标题是否已存在
+
+        Args:
+            title: 热搜标题
+
+        Returns:
+            True 如果已存在，False 否则
+        """
+        async with await self._get_connection() as conn:
+            title_hash = self.hash_title(title)
+            result = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM weibo_hot_search_cache WHERE title_hash = $1)",
+                title_hash
+            )
+            return result
+
+    async def batch_exists(self, titles: list[str]) -> set[str]:
+        """
+        批量检查热搜标题是否已存在
+
+        Args:
+            titles: 热搜标题列表
+
+        Returns:
+            已存在的标题集合
+        """
+        if not titles:
+            return set()
+
+        async with await self._get_connection() as conn:
+            title_hashes = [self.hash_title(title) for title in titles]
+            rows = await conn.fetch(
+                "SELECT title FROM weibo_hot_search_cache WHERE title_hash = ANY($1::varchar(64)[])",
+                title_hashes
+            )
+            return {row['title'] for row in rows}
+
+    async def insert_initial(self, title: str) -> bool:
+        """
+        插入初始热搜记录（描述为空）
+
+        Args:
+            title: 热搜标题
+
+        Returns:
+            True 如果插入成功，False 如果记录已存在
+        """
+        async with await self._get_connection() as conn:
+            title_hash = self.hash_title(title)
+            now = datetime.now()
+            expires_at = now + self.CACHE_TTL
+
+            # 使用 INSERT ... ON CONFLICT DO NOTHING
+            result = await conn.execute(
+                """INSERT INTO weibo_hot_search_cache
+                   (title_hash, title, description, description_source, created_at, updated_at, expires_at)
+                   VALUES ($1, $2, '', '', $3, $3, $4)
+                   ON CONFLICT (title_hash) DO NOTHING""",
+                title_hash, title, now, expires_at
+            )
+
+            # 解析 "INSERT 0 1" 返回值
+            count = int(result.split()[-1])
+            if count > 0:
+                logger.info(f"✓ Inserted initial cache: {title[:30]}...")
+                return True
+            else:
+                logger.debug(f"✗ Already exists: {title[:30]}...")
+                return False

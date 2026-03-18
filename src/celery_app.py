@@ -14,7 +14,7 @@ celery_app = Celery(
     'news_agent',
     broker=REDIS_URL,
     backend=REDIS_URL,
-    include=['src.tasks.cache_tasks']  # 导入任务模块
+    include=['src.tasks.cache_tasks', 'src.tasks.weibo_tasks']  # 导入任务模块
 )
 
 # Celery 配置
@@ -49,5 +49,10 @@ celery_app.conf.beat_schedule = {
     'clean-expired-weibo-cache': {
         'task': 'src.tasks.cache_tasks.clean_expired_cache',
         'schedule': crontab(minute='*/10'),  # 每10分钟
+    },
+    # 每小时抓取微博热搜标题
+    'fetch-weibo-hot-search-titles': {
+        'task': 'src.tasks.weibo_tasks.fetch_and_save_hot_search_titles',
+        'schedule': crontab(minute=0),  # 每小时整点执行
     },
 }
