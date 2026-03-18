@@ -1,0 +1,24 @@
+[Unit]
+Description=Celery Worker for News Agent
+After=network.target redis.service
+Requires=redis.service
+
+[Service]
+Type=simple
+User=<USER>
+Group=<USER>
+WorkingDirectory=/home/<USER>/news-agent
+Environment="PATH=/home/<USER>/news-agent/.venv/bin:/usr/bin"
+EnvironmentFile=/home/<USER>/news-agent/.env
+ExecStart=/home/<USER>/news-agent/.venv/bin/celery -A src.celery_app worker \
+    --loglevel=info \
+    --logfile=/home/<USER>/news-agent/logs/celery/worker.log \
+    --concurrency=4
+ExecStop=/bin/kill -s TERM \$MAINPID
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

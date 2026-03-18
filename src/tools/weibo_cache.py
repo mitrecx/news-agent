@@ -3,7 +3,7 @@
 import hashlib
 import logging
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, List, Set
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +149,7 @@ class WeiboHotSearchCache:
 
             logger.info(f"✓ Cached: {title[:30]}... (expires at {expires_at.strftime('%H:%M:%S')})")
 
-    async def batch_get(self, titles: list[str]) -> dict[str, dict]:
+    async def batch_get(self, titles: List[str]) -> dict[str, dict]:
         """
         批量获取缓存
 
@@ -286,7 +286,7 @@ class WeiboHotSearchCache:
             )
             return result
 
-    async def batch_exists(self, titles: list[str]) -> set[str]:
+    async def batch_exists(self, titles: List[str]) -> Set[str]:
         """
         批量检查热搜标题是否已存在
 

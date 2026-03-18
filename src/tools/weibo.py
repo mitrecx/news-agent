@@ -353,52 +353,6 @@ class WeiboScraper:
         logger.info(f"✅ 成功解析 {len(items)} 条热搜")
         return items
 
-    def _get_mock_data(self, limit: int) -> List[HotSearchItem]:
-        """
-        获取模拟数据（当爬虫失败时使用）
-
-        Args:
-            limit: 返回数量
-
-        Returns:
-            模拟的热搜条目列表
-        """
-        mock_items = [
-            ("2025年度科技热点盘点", "356.2万", "科技", "热"),
-            ("春节档电影票房创新高", "298.5万", "娱乐", "新"),
-            ("各地文旅局长花式卷", "245.8万", "社会", "热"),
-            ("新能源汽车销量持续增长", "198.3万", "财经", ""),
-            ("人工智能发展新突破", "176.5万", "科技", "热"),
-            ("城市更新行动持续推进", "154.2万", "社会", ""),
-            ("年轻人养生方式引热议", "132.8万", "生活", "新"),
-            ("各地美食文化出圈", "118.6万", "生活", ""),
-            ("数字货币应用场景扩大", "98.5万", "财经", ""),
-            ("国产芯片技术取得进展", "87.3万", "科技", "热"),
-            ("影视行业复苏势头强劲", "76.2万", "娱乐", ""),
-            ("全民健身计划启动", "65.8万", "社会", "新"),
-            ("5G网络覆盖率提升", "54.3万", "科技", ""),
-            ("远程办公新模式普及", "43.7万", "职场", ""),
-            ("绿色低碳生活方式", "38.2万", "生活", ""),
-            ("在线教育创新发展", "32.6万", "教育", ""),
-            ("新消费品牌崛起", "28.5万", "财经", "热"),
-            ("乡村振兴成果显著", "24.3万", "社会", ""),
-            ("数字文产业发展迅速", "19.8万", "科技", ""),
-            ("非物质文化遗产保护", "16.5万", "文化", "新"),
-        ]
-
-        items = []
-        for idx, (title, hot, category, icon) in enumerate(mock_items[:limit], 1):
-            items.append(HotSearchItem(
-                rank=idx,
-                title=title,
-                hot_value=hot,
-                category=category,
-                url=f"https://s.weibo.com/weibo?q=%23{title}%23",
-                icon=icon if icon else None
-            ))
-
-        return items
-
     async def _fetch_item_content(self, item: HotSearchItem) -> str:
         """
         为单条热搜获取微博内容
@@ -766,12 +720,10 @@ class WeiboScraper:
                 logger.warning(f"⚠️ Selenium 爬取也失败: {e}")
                 print(f"⚠️ Selenium 爬取也失败: {e}")
 
-        # 方法4: 返回模拟数据
-        logger.info("📦 使用模拟数据")
-        print("📦 步骤 4/4: 使用模拟数据...\n")
-        items = self._get_mock_data(limit)
-        logger.info(f"✅ 返回模拟数据，共 {len(items)} 条")
-        return items
+        # 所有爬取方法都失败，抛出异常
+        logger.error("❌ 所有爬取方法都失败，无法获取微博热搜数据")
+        print("❌ 错误: 所有爬取方法都失败，请检查网络连接或微博 Cookie 配置")
+        raise Exception("所有爬取方法都失败，无法获取微博热搜数据。请检查：1) 网络连接 2) 微博 Cookie 是否有效 3) 微博是否可访问")
 
     async def _ensure_cache_manager(self):
         """确保缓存管理器已初始化"""

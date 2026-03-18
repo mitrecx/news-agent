@@ -48,10 +48,8 @@
 
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElIcon } from 'element-plus'
 import { ChatDotRound, Loading } from '@element-plus/icons-vue'
-import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
 import { useConversationStore } from '@/stores/conversation'
 import { useChatStream } from '@/composables/useChatStream'
@@ -61,8 +59,6 @@ import ChatInput from '@/components/ChatInput.vue'
 import ConversationSidebar from '@/components/ConversationSidebar.vue'
 import AppNav from '@/components/AppNav.vue'
 
-const router = useRouter()
-const authStore = useAuthStore()
 const chatStore = useChatStore()
 const conversationStore = useConversationStore()
 const { sendMessage, progressMessage, loadConversation } = useChatStream()

@@ -126,6 +126,29 @@ deploy_project() {
 
     cd $project_path
 
+    echo '=== 创建 Python 虚拟环境 ==='
+    if [ ! -d .venv ]; then
+        python3 -m venv .venv
+        echo '✅ 虚拟环境创建完成'
+    else
+        echo '✅ 虚拟环境已存在'
+    fi
+
+    echo ''
+    echo '=== 安装 Python 依赖 ==='
+    source .venv/bin/activate
+
+    # 检查是否安装了 uv
+    if ! command -v uv &> /dev/null; then
+        echo '安装 uv 包管理器...'
+        pip install uv -q
+    fi
+
+    # 使用 uv 同步依赖
+    uv sync -q
+    echo '✅ Python 依赖安装完成'
+
+    echo ''
     echo '=== 配置环境变量 ==='
 
     # 创建 .env 文件
@@ -146,6 +169,7 @@ AGENT_MAX_TOKENS=${AGENT_MAX_TOKENS:-2000}
 # 微博热搜
 WEIBO_SCRAPER_TIMEOUT=${WEIBO_SCRAPER_TIMEOUT:-10}
 WEIBO_USE_SELENIUM=${WEIBO_USE_SELENIUM:-true}
+WEIBO_COOKIE=${WEIBO_COOKIE:-}
 
 # 数据库配置
 DB_HOST=${DB_HOST:-localhost}
@@ -153,6 +177,10 @@ DB_PORT=${DB_PORT:-5432}
 DB_USER=${DB_USER}
 DB_PASSWORD=${DB_PASSWORD}
 DB_NAME=${DB_NAME:-news_agent}
+
+# Redis 配置（用于 Celery）
+REDIS_HOST=${REDIS_HOST:-127.0.0.1}
+REDIS_PORT=${REDIS_PORT:-6379}
 
 # JWT 配置
 JWT_SECRET=${JWT_SECRET}
@@ -184,6 +212,105 @@ ENVFILE
     log_success "项目部署完成"
 }
 
+# 部署 Celery 服务
+deploy_celery_service() {
+    log_info "部署 Celery 服务..."
+
+    local project_path="${SERVER_PROJECT_PATH:-$HOME/news-agent}"
+
+    ssh "$SERVER_USER@$SERVER_HOST" "
+    set -e
+
+    cd $project_path
+
+    echo '=== 检查并安装 Redis ==='
+    if ! command -v redis-server &> /dev/null; then
+        echo 'Redis 未安装，开始安装...'
+
+        # 检测操作系统类型并使用相应的包管理器
+        if command -v apt &> /dev/null; then
+            # Ubuntu/Debian
+            sudo apt update
+            sudo apt install redis-server -y
+        elif command -v yum &> /dev/null; then
+            # RHEL/CentOS/Alibaba Cloud Linux
+            sudo yum install -y redis
+        elif command -v dnf &> /dev/null; then
+            # Fedora
+            sudo dnf install -y redis
+        else
+            echo '❌ 无法检测包管理器，请手动安装 Redis'
+            exit 1
+        fi
+
+        echo '✅ Redis 安装完成'
+    else
+        echo '✅ Redis 已安装'
+    fi
+
+    echo ''
+    echo '=== 启动 Redis 服务 ==='
+    sudo systemctl start redis || true
+    sudo systemctl enable redis
+    echo '✅ Redis 服务已启动'
+
+    echo ''
+    echo '=== 验证 Redis 连接 ==='
+    if redis-cli ping | grep -q PONG; then
+        echo '✅ Redis 连接正常'
+    else
+        echo '❌ Redis 连接失败'
+        exit 1
+    fi
+
+    echo ''
+    echo '=== 创建日志目录 ==='
+    mkdir -p logs/celery
+
+    echo ''
+    echo '=== 部署 Celery Worker 服务 ==='
+    # 替换用户名
+    sed \"s/<USER>/$SERVER_USER/g\" deploy/celery-worker.service | sudo tee /etc/systemd/system/news-agent-celery-worker.service > /dev/null
+
+    # 更新工作目录路径
+    sudo sed -i \"s|WorkingDirectory=/home/<USER>/news-agent|WorkingDirectory=$project_path|g\" /etc/systemd/system/news-agent-celery-worker.service
+    sudo sed -i \"s|/home/<USER>/news-agent|$project_path|g\" /etc/systemd/system/news-agent-celery-worker.service
+
+    echo ''
+    echo '=== 部署 Celery Beat 服务 ==='
+    sed \"s/<USER>/$SERVER_USER/g\" deploy/celery-beat.service | sudo tee /etc/systemd/system/news-agent-celery-beat.service > /dev/null
+
+    # 更新工作目录路径
+    sudo sed -i \"s|WorkingDirectory=/home/<USER>/news-agent|WorkingDirectory=$project_path|g\" /etc/systemd/system/news-agent-celery-beat.service
+    sudo sed -i \"s|/home/<USER>/news-agent|$project_path|g\" /etc/systemd/system/news-agent-celery-beat.service
+
+    echo ''
+    echo '=== 重载 systemd 配置 ==='
+    sudo systemctl daemon-reload
+
+    echo ''
+    echo '=== 启动 Celery Worker 服务 ==='
+    sudo systemctl restart news-agent-celery-worker || sudo systemctl start news-agent-celery-worker
+    sudo systemctl enable news-agent-celery-worker
+
+    echo ''
+    echo '=== 启动 Celery Beat 服务 ==='
+    sudo systemctl restart news-agent-celery-beat || sudo systemctl start news-agent-celery-beat
+    sudo systemctl enable news-agent-celery-beat
+
+    echo ''
+    echo '=== 检查 Celery 服务状态 ==='
+    echo 'Celery Worker 状态:'
+    sudo systemctl status news-agent-celery-worker --no-pager | head -5
+    echo ''
+    echo 'Celery Beat 状态:'
+    sudo systemctl status news-agent-celery-beat --no-pager | head -5
+
+    "
+
+    log_success "Celery 服务部署完成"
+}
+
 # 重启后端服务
 restart_service() {
     log_info "重启后端服务..."
@@ -197,7 +324,7 @@ restart_service() {
 
     echo ''
     echo '=== 检查服务状态 ==='
-    sudo systemctl status news-agent-backend | head -10
+    sudo systemctl status news-agent-backend --no-pager | head -10
 
     "
 
@@ -226,7 +353,14 @@ test_deployment() {
     echo ""
     log_success "部署完成！"
     echo ""
-    echo "查看日志: ssh $SERVER_USER@$SERVER_HOST 'sudo journalctl -u news-agent-backend -f'"
+    echo "查看日志:"
+    echo "  - 后端: ssh $SERVER_USER@$SERVER_HOST 'sudo journalctl -u news-agent-backend -f'"
+    echo "  - Celery Worker: ssh $SERVER_USER@$SERVER_HOST 'sudo journalctl -u news-agent-celery-worker -f'"
+    echo "  - Celery Beat: ssh $SERVER_USER@$SERVER_HOST 'sudo journalctl -u news-agent-celery-beat -f'"
+    echo ""
+    echo "查看 Celery 日志文件:"
+    echo "  - Worker: ssh $SERVER_USER@$SERVER_HOST 'tail -f ${SERVER_PROJECT_PATH:-$HOME/news-agent}/logs/celery/worker.log'"
+    echo "  - Beat: ssh $SERVER_USER@$SERVER_HOST 'tail -f ${SERVER_PROJECT_PATH:-$HOME/news-agent}/logs/celery/beat.log'"
 }
 
 # 主函数
@@ -270,6 +404,7 @@ main() {
     test_ssh_connection
     upload_project
     deploy_project
+    deploy_celery_service
     restart_service
     test_deployment
 

@@ -68,15 +68,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElCard, ElIcon } from 'element-plus'
 import { ChatDotRound, TrendCharts, Check } from '@element-plus/icons-vue'
-import { useAuthStore } from '@/stores/auth'
 import AppNav from '@/components/AppNav.vue'
 
 const router = useRouter()
-const authStore = useAuthStore()
 
 const navigateToChat = () => {
   router.push('/chat')

@@ -111,15 +111,10 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Search, RefreshLeft } from '@element-plus/icons-vue'
-import { useAuthStore } from '@/stores/auth'
 import { getWeiboHotSearchCache, type HotSearchCacheItem } from '@/api/hotsearch'
 import AppNav from '@/components/AppNav.vue'
-
-const router = useRouter()
-const authStore = useAuthStore()
 
 // 数据
 const cacheItems = ref<HotSearchCacheItem[]>([])

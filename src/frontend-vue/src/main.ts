@@ -9,7 +9,7 @@ import App from './App.vue'
 import router from './router'
 
 // Prevent multiple app instances in development (HMR issue)
-const appElement = document.querySelector('#app')
+const appElement = document.querySelector('#app') as HTMLElement & { __vue_app__?: unknown }
 if (appElement && !appElement.__vue_app__) {
   const app = createApp(App)
 

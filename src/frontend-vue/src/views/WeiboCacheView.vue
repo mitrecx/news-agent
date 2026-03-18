@@ -118,15 +118,10 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, Search, Delete } from '@element-plus/icons-vue'
-import { useAuthStore } from '@/stores/auth'
 import { getWeiboCache, getWeiboCacheStats, deleteExpiredCache, type WeiboCacheItem, type WeiboCacheStats } from '@/api/weibo'
 import AppNav from '@/components/AppNav.vue'
-
-const router = useRouter()
-const authStore = useAuthStore()
 
 // 数据
 const cacheItems = ref<WeiboCacheItem[]>([])
