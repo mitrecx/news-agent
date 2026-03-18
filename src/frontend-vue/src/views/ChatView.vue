@@ -1,76 +1,47 @@
 <template>
   <div class="chat-view">
-    <!-- 对话侧边栏 -->
-    <ConversationSidebar />
+    <!-- 顶部导航栏 -->
+    <AppNav :full-width="true" />
 
-    <!-- 主聊天区域 -->
-    <div class="chat-main">
-      <!-- Header -->
-      <div class="chat-header">
-        <div class="header-content">
-          <div class="nav-tabs">
-            <div class="nav-tab" @click="handleNavigateToHome">
-              <el-icon><HomeFilled /></el-icon>
-              首页
-            </div>
-            <div class="nav-tab active">
-              <el-icon><ChatDotRound /></el-icon>
-              智能对话
-            </div>
-            <div class="nav-tab" @click="handleNavigateToHotSearch">
-              <el-icon><TrendCharts /></el-icon>
-              热搜查询
-            </div>
+    <!-- 对话内容区域 -->
+    <div class="chat-content">
+      <!-- 对话侧边栏 -->
+      <ConversationSidebar />
+
+      <!-- 主聊天区域 -->
+      <div class="chat-main">
+        <!-- Messages -->
+        <div class="chat-messages" ref="messagesContainer">
+          <div v-if="chatStore.messages.length === 0" class="welcome">
+            <el-icon size="64" color="#9ca3af"><ChatDotRound /></el-icon>
+            <h2>欢迎使用 News Agent</h2>
+            <p>基于 DeepSeek 模型的智能对话助手</p>
+            <p>支持查询微博热搜</p>
           </div>
-          <el-dropdown trigger="click">
-            <div class="user-dropdown">
-              <div class="user-avatar">{{ authStore.user?.username?.charAt(0).toUpperCase() || '?' }}</div>
-              <span>{{ authStore.user?.username }}</span>
-              <el-icon><ArrowDown /></el-icon>
-            </div>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item @click="handleLogout" divided>
-                  <el-icon><SwitchButton /></el-icon>
-                  退出登录
-                </el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-        </div>
-      </div>
 
-      <!-- Messages -->
-      <div class="chat-messages" ref="messagesContainer">
-        <div v-if="chatStore.messages.length === 0" class="welcome">
-          <el-icon size="64" color="#9ca3af"><ChatDotRound /></el-icon>
-          <h2>欢迎使用 News Agent</h2>
-          <p>基于 DeepSeek 模型的智能对话助手</p>
-          <p>支持查询微博热搜</p>
+          <ChatMessage
+            v-for="(message, index) in chatStore.messages"
+            :key="index"
+            :message="message"
+            :is-streaming="chatStore.isStreaming && index === chatStore.messages.length - 1 && message.role === 'assistant'"
+          />
+
+          <!-- Progress indicator -->
+          <div v-if="progressMessage" class="progress-indicator">
+            <el-icon class="is-loading"><Loading /></el-icon>
+            <span>{{ progressMessage }}</span>
+          </div>
         </div>
 
-        <ChatMessage
-          v-for="(message, index) in chatStore.messages"
-          :key="index"
-          :message="message"
-          :is-streaming="chatStore.isStreaming && index === chatStore.messages.length - 1 && message.role === 'assistant'"
+        <!-- Input -->
+        <ChatInput
+          ref="chatInputRef"
+          :is-streaming="chatStore.isStreaming"
+          :is-connected="chatStore.isConnected"
+          :messages="chatStore.messages"
+          @send="handleSend"
         />
-
-        <!-- Progress indicator -->
-        <div v-if="progressMessage" class="progress-indicator">
-          <el-icon class="is-loading"><Loading /></el-icon>
-          <span>{{ progressMessage }}</span>
-        </div>
       </div>
-
-      <!-- Input -->
-      <ChatInput
-        ref="chatInputRef"
-        :is-streaming="chatStore.isStreaming"
-        :is-connected="chatStore.isConnected"
-        :messages="chatStore.messages"
-        @send="handleSend"
-      />
     </div>
   </div>
 </template>
@@ -78,8 +49,8 @@
 <script setup lang="ts">
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElDropdown, ElDropdownMenu, ElDropdownItem, ElIcon } from 'element-plus'
-import { SwitchButton, ChatDotRound, Loading, ArrowDown, TrendCharts, HomeFilled } from '@element-plus/icons-vue'
+import { ElIcon } from 'element-plus'
+import { ChatDotRound, Loading } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
 import { useConversationStore } from '@/stores/conversation'
@@ -88,6 +59,7 @@ import { useHealthCheck } from '@/composables/useHealthCheck'
 import ChatMessage from '@/components/ChatMessage.vue'
 import ChatInput from '@/components/ChatInput.vue'
 import ConversationSidebar from '@/components/ConversationSidebar.vue'
+import AppNav from '@/components/AppNav.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -155,21 +127,6 @@ const handleSend = (message: string) => {
   sendMessage(message)
 }
 
-const handleLogout = () => {
-  authStore.logout()
-  chatStore.clearMessages()
-  conversationStore.clearCurrentConversation()
-  router.push('/login')
-}
-
-const handleNavigateToHotSearch = () => {
-  router.push('/hot-search')
-}
-
-const handleNavigateToHome = () => {
-  router.push('/')
-}
-
 // Start health check
 useHealthCheck()
 </script>
@@ -177,118 +134,21 @@ useHealthCheck()
 <style scoped>
 .chat-view {
   display: flex;
+  flex-direction: column;
   height: 100vh;
   background: #f9fafb;
+}
+
+.chat-content {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
 }
 
 .chat-main {
   flex: 1;
   display: flex;
   flex-direction: column;
-}
-
-.chat-header {
-  position: sticky;
-  top: 0;
-  left: 0;
-  right: 0;
-  background: white;
-  border-bottom: 1px solid #e5e7eb;
-  padding: 12px 20px;
-  height: 56px;
-  display: flex;
-  align-items: center;
-  z-index: 1000;
-  width: 100%;
-}
-
-.header-content {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  max-width: 1200px;
-  margin: 0 auto;
-  width: 100%;
-}
-
-.status-indicator {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  color: #6b7280;
-}
-
-.status-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #f87171;
-}
-
-.status-dot.connected {
-  background: #4ade80;
-}
-
-.nav-tabs {
-  display: flex;
-  gap: 12px;
-}
-
-.nav-tab {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
-  background: #f3f4f6;
-  border-radius: 8px;
-  transition: all 0.2s;
-  color: #374151;
-  cursor: pointer;
-  font-weight: 500;
-}
-
-.nav-tab:hover {
-  background: #e5e7eb;
-}
-
-.nav-tab.active {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-}
-
-.user-dropdown {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  padding: 6px 12px;
-  border-radius: 8px;
-  transition: background 0.2s;
-  color: #374151;
-}
-
-.user-dropdown:hover {
-  background: #f3f4f6;
-}
-
-.user-avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  font-weight: 500;
-  flex-shrink: 0;
-}
-
-.user-dropdown .el-icon {
-  font-size: 14px;
-  color: #9ca3af;
 }
 
 .chat-messages {

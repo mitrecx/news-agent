@@ -1,37 +1,10 @@
 <template>
   <div class="home-view">
-    <div class="home-container">
-      <!-- Header -->
-      <div class="home-header">
-        <div class="header-content">
-          <div class="nav-tabs">
-            <div class="nav-tab" @click="navigateToChat">
-              <el-icon><ChatDotRound /></el-icon>
-              智能对话
-            </div>
-            <div class="nav-tab" @click="navigateToHotSearch">
-              <el-icon><TrendCharts /></el-icon>
-              热搜查询
-            </div>
-          </div>
-          <el-dropdown trigger="click">
-            <div class="user-dropdown">
-              <div class="user-avatar">{{ authStore.user?.username?.charAt(0).toUpperCase() || '?' }}</div>
-              <span>{{ authStore.user?.username }}</span>
-              <el-icon><ArrowDown /></el-icon>
-            </div>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item @click="handleLogout">
-                  <el-icon><SwitchButton /></el-icon>
-                  退出登录
-                </el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-        </div>
-      </div>
+    <!-- 顶部导航栏 -->
+    <AppNav :full-width="true" />
 
+    <!-- 首页内容 -->
+    <div class="home-container">
       <!-- Welcome Section -->
       <div class="welcome-section">
         <div class="welcome-content">
@@ -97,9 +70,10 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElIcon, ElDropdown, ElDropdownMenu, ElDropdownItem, ElCard, ElMessage } from 'element-plus'
-import { ArrowDown, SwitchButton, ChatDotRound, TrendCharts, Check } from '@element-plus/icons-vue'
+import { ElCard, ElIcon } from 'element-plus'
+import { ChatDotRound, TrendCharts, Check } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
+import AppNav from '@/components/AppNav.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -111,99 +85,28 @@ const navigateToChat = () => {
 const navigateToHotSearch = () => {
   router.push('/hot-search')
 }
-
-const handleLogout = () => {
-  authStore.logout()
-  router.push('/login')
-  ElMessage.success('已退出登录')
-}
 </script>
 
 <style scoped>
 .home-view {
   min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #f9fafb;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
+  flex-direction: column;
 }
 
 .home-container {
-  max-width: 1200px;
-  width: 100%;
-}
-
-.home-header {
-  position: sticky;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 1000;
-  width: 100%;
-  margin-bottom: 40px;
-}
-
-.header-content {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border-radius: 24px;
+  box-shadow: 0 20px 60px rgba(102, 126, 234, 0.3);
+  flex: 1;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.nav-tabs {
-  display: flex;
-  gap: 12px;
-}
-
-.nav-tab {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 12px;
-  backdrop-filter: blur(10px);
-  transition: all 0.3s ease;
-  color: white;
-  cursor: pointer;
-  font-weight: 500;
-}
-
-.nav-tab:hover {
-  background: rgba(255, 255, 255, 0.3);
-  transform: translateY(-2px);
-}
-
-.user-dropdown {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  padding: 10px 16px;
-  background: rgba(255, 255, 255, 0.2);
-  border-radius: 12px;
-  backdrop-filter: blur(10px);
-  transition: all 0.3s ease;
-  color: white;
-}
-
-.user-dropdown:hover {
-  background: rgba(255, 255, 255, 0.3);
-  transform: translateY(-2px);
-}
-
-.user-avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.3);
-  color: white;
-  display: flex;
-  align-items: center;
+  flex-direction: column;
   justify-content: center;
-  font-size: 14px;
-  font-weight: 600;
-  flex-shrink: 0;
+  padding: 60px 40px;
+  margin: 20px;
+  max-width: 1200px;
+  width: calc(100% - 40px);
 }
 
 .welcome-section {
@@ -327,6 +230,12 @@ const handleLogout = () => {
 
 /* Responsive */
 @media (max-width: 768px) {
+  .home-container {
+    padding: 40px 24px;
+    margin: 16px;
+    width: calc(100% - 32px);
+  }
+
   .welcome-title {
     font-size: 32px;
   }

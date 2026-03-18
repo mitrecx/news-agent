@@ -1,40 +1,9 @@
 <template>
   <div class="weibo-cache-view">
-    <div class="top-nav">
-      <div class="nav-content">
-        <el-button link @click="router.push('/')">
-          <el-icon><ArrowLeft /></el-icon>
-          返回首页
-        </el-button>
-        <div class="user-menu">
-          <el-dropdown trigger="click">
-            <div class="user-dropdown">
-              <div class="user-avatar">{{ authStore.user?.username?.charAt(0).toUpperCase() || '?' }}</div>
-              <span>{{ authStore.user?.username }}</span>
-              <el-icon><ArrowDown /></el-icon>
-            </div>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item @click="router.push('/chat')">
-                  <el-icon><ChatDotRound /></el-icon>
-                  智能对话
-                </el-dropdown-item>
-                <el-dropdown-item @click="router.push('/hot-search')">
-                  <el-icon><TrendCharts /></el-icon>
-                  热搜查询
-                </el-dropdown-item>
-                <el-dropdown-item @click="handleLogout" divided>
-                  <el-icon><SwitchButton /></el-icon>
-                  退出登录
-                </el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
-        </div>
-      </div>
-    </div>
+    <AppNav :full-width="true" />
 
-    <div class="cache-header">
+    <div class="weibo-cache-content">
+      <div class="cache-header">
       <h1>微博热搜缓存</h1>
       <el-button @click="refreshCache" :loading="loading">
         <el-icon><Refresh /></el-icon>
@@ -143,6 +112,7 @@
         @size-change="handleSizeChange"
       />
     </div>
+    </div>
   </div>
 </template>
 
@@ -150,9 +120,10 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Search, Delete, ArrowLeft, ArrowDown, ChatDotRound, SwitchButton, TrendCharts } from '@element-plus/icons-vue'
+import { Refresh, Search, Delete } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { getWeiboCache, getWeiboCacheStats, deleteExpiredCache, type WeiboCacheItem, type WeiboCacheStats } from '@/api/weibo'
+import AppNav from '@/components/AppNav.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -298,13 +269,6 @@ onMounted(() => {
   fetchCache()
   fetchStats()
 })
-
-// 退出登录
-const handleLogout = () => {
-  authStore.logout()
-  router.push('/login')
-  ElMessage.success('已退出登录')
-}
 </script>
 
 <style scoped>
@@ -313,56 +277,10 @@ const handleLogout = () => {
   background: #f5f7fa;
 }
 
-.top-nav {
-  background: white;
-  border-bottom: 1px solid #e5e7eb;
-  padding: 12px 24px;
-  position: sticky;
-  top: 0;
-  z-index: 100;
-}
-
-.nav-content {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+.weibo-cache-content {
+  padding: 0;
   max-width: 1600px;
-  margin: 0 auto;
-}
-
-.user-dropdown {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  padding: 6px 12px;
-  border-radius: 8px;
-  transition: background 0.2s;
-  color: #374151;
-}
-
-.user-dropdown:hover {
-  background: #f3f4f6;
-}
-
-.user-avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  font-weight: 500;
-  flex-shrink: 0;
-}
-
-.weibo-cache-view {
-  padding: 24px;
-  max-width: 1600px;
-  margin: 0 auto;
+  margin: 0 auto 24px auto;
 }
 
 .cache-header {

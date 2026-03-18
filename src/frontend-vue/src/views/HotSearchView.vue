@@ -1,41 +1,11 @@
 <template>
   <div class="hot-search-view">
-    <div class="top-nav">
-      <div class="nav-content">
-        <div class="nav-tabs">
-          <div class="nav-tab" @click="router.push('/')">
-            <el-icon><HomeFilled /></el-icon>
-            首页
-          </div>
-          <div class="nav-tab" @click="router.push('/chat')">
-            <el-icon><ChatDotRound /></el-icon>
-            智能对话
-          </div>
-          <div class="nav-tab active">
-            <el-icon><TrendCharts /></el-icon>
-            热搜查询
-          </div>
-        </div>
-        <el-dropdown trigger="click">
-          <div class="user-dropdown">
-            <div class="user-avatar">{{ authStore.user?.username?.charAt(0).toUpperCase() || '?' }}</div>
-            <span>{{ authStore.user?.username }}</span>
-            <el-icon><ArrowDown /></el-icon>
-          </div>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item @click="handleLogout" divided>
-                <el-icon><SwitchButton /></el-icon>
-                退出登录
-              </el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
-      </div>
-    </div>
+    <AppNav :full-width="true" />
 
-    <!-- 数据表格 -->
-    <el-card class="table-card">
+    <!-- 内容区域 -->
+    <div class="hot-search-content">
+      <!-- 数据表格 -->
+      <el-card class="table-card">
       <template #header>
         <el-form :inline="true" :model="filters" class="filter-form">
           <el-form-item label="标题搜索">
@@ -135,6 +105,7 @@
         />
       </div>
     </el-card>
+    </div>
   </div>
 </template>
 
@@ -142,9 +113,10 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Search, RefreshLeft, ArrowDown, ChatDotRound, SwitchButton, TrendCharts, HomeFilled } from '@element-plus/icons-vue'
+import { Search, RefreshLeft } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { getWeiboHotSearchCache, type HotSearchCacheItem } from '@/api/hotsearch'
+import AppNav from '@/components/AppNav.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -247,13 +219,6 @@ const handleSizeChange = () => {
   fetchCache()
 }
 
-// 退出登录
-const handleLogout = () => {
-  authStore.logout()
-  router.push('/login')
-  ElMessage.success('已退出登录')
-}
-
 // 初始化
 onMounted(() => {
   // 设置默认日期范围为今天
@@ -283,87 +248,17 @@ onMounted(() => {
 .hot-search-view {
   min-height: 100vh;
   background: #f5f7fa;
-  padding: 24px;
 }
 
-.top-nav {
-  background: white;
-  border-bottom: 1px solid #e5e7eb;
-  padding: 12px 24px;
-  position: sticky;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 1000;
-  width: 100%;
-}
-
-.nav-content {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  max-width: 1200px;
-  margin: 0 auto;
-}
-
-.nav-tabs {
-  display: flex;
-  gap: 12px;
-}
-
-.nav-tab {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 16px;
-  background: #f3f4f6;
-  border-radius: 8px;
-  transition: all 0.2s;
-  color: #374151;
-  cursor: pointer;
-  font-weight: 500;
-}
-
-.nav-tab:hover {
-  background: #e5e7eb;
-}
-
-.nav-tab.active {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-}
-
-.user-dropdown {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  padding: 6px 12px;
-  border-radius: 8px;
-  transition: background 0.2s;
-  color: #374151;
-}
-
-.user-dropdown:hover {
-  background: #f3f4f6;
-}
-
-.user-avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  font-weight: 500;
-  flex-shrink: 0;
+.hot-search-content {
+  max-width: 1600px;
+  margin: 0 auto 24px auto;
+  padding: 0;
 }
 
 .table-card {
-  max-width: 1400px;
+  /* 让卡片充满容器，并添加适当的间距 */
+  margin-bottom: 24px;
 }
 
 .filter-form {
@@ -392,12 +287,12 @@ onMounted(() => {
 
 /* 响应式 */
 @media (max-width: 768px) {
-  .hot-search-view {
-    padding: 16px;
+  .hot-search-content {
+    margin: 16px;
   }
 
-  .top-nav {
-    margin: -16px -16px 16px -16px;
+  .table-card {
+    /* 移动端卡片不需要特殊样式 */
   }
 
   .filter-form {

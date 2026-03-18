@@ -1,6 +1,5 @@
 import axios, { type AxiosInstance, type AxiosError } from 'axios'
 import { ElMessage } from 'element-plus'
-import { useAuthStore } from '@/stores/auth'
 
 /** Create axios instance with base configuration */
 const request: AxiosInstance = axios.create({
@@ -14,9 +13,10 @@ const request: AxiosInstance = axios.create({
 /** Request interceptor - add auth token */
 request.interceptors.request.use(
   (config) => {
-    const authStore = useAuthStore()
-    if (authStore.token) {
-      config.headers.Authorization = `Bearer ${authStore.token}`
+    // Dynamically import store to avoid circular dependency
+    const token = localStorage.getItem('auth_token')
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
     }
     return config
   },
@@ -31,8 +31,6 @@ request.interceptors.response.use(
     return response
   },
   (error: AxiosError) => {
-    const authStore = useAuthStore()
-
     if (error.response) {
       const status = error.response.status
       const message = (error.response.data as any)?.detail || '请求失败'
@@ -40,7 +38,11 @@ request.interceptors.response.use(
       switch (status) {
         case 401:
           ElMessage.error('未授权，请重新登录')
-          authStore.logout()
+          localStorage.removeItem('auth_token')
+          // Redirect to login page
+          if (window.location.pathname !== '/login') {
+            window.location.href = '/login'
+          }
           break
         case 403:
           ElMessage.error('没有权限访问')
