@@ -4,13 +4,22 @@
       <!-- Header -->
       <div class="home-header">
         <div class="header-content">
-          <div class="user-dropdown" @click="handleUserMenuClick">
-            <div class="user-avatar">{{ authStore.user?.username?.charAt(0).toUpperCase() || '?' }}</div>
-            <span>{{ authStore.user?.username }}</span>
-            <el-icon><ArrowDown /></el-icon>
+          <div class="nav-tabs">
+            <div class="nav-tab" @click="navigateToChat">
+              <el-icon><ChatDotRound /></el-icon>
+              智能对话
+            </div>
+            <div class="nav-tab" @click="navigateToHotSearch">
+              <el-icon><TrendCharts /></el-icon>
+              热搜查询
+            </div>
           </div>
-          <el-dropdown trigger="click" ref="dropdownRef">
-            <span style="display: none;"></span>
+          <el-dropdown trigger="click">
+            <div class="user-dropdown">
+              <div class="user-avatar">{{ authStore.user?.username?.charAt(0).toUpperCase() || '?' }}</div>
+              <span>{{ authStore.user?.username }}</span>
+              <el-icon><ArrowDown /></el-icon>
+            </div>
             <template #dropdown>
               <el-dropdown-menu>
                 <el-dropdown-item @click="handleLogout">
@@ -94,7 +103,6 @@ import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
 const authStore = useAuthStore()
-const dropdownRef = ref()
 
 const navigateToChat = () => {
   router.push('/chat')
@@ -102,10 +110,6 @@ const navigateToChat = () => {
 
 const navigateToHotSearch = () => {
   router.push('/hot-search')
-}
-
-const handleUserMenuClick = () => {
-  dropdownRef.value?.handleOpen()
 }
 
 const handleLogout = () => {
@@ -131,13 +135,43 @@ const handleLogout = () => {
 }
 
 .home-header {
+  position: sticky;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  width: 100%;
   margin-bottom: 40px;
 }
 
 .header-content {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
   align-items: center;
+}
+
+.nav-tabs {
+  display: flex;
+  gap: 12px;
+}
+
+.nav-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 12px;
+  backdrop-filter: blur(10px);
+  transition: all 0.3s ease;
+  color: white;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.nav-tab:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: translateY(-2px);
 }
 
 .user-dropdown {

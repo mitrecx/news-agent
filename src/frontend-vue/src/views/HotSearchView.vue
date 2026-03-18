@@ -2,31 +2,35 @@
   <div class="hot-search-view">
     <div class="top-nav">
       <div class="nav-content">
-        <el-button link @click="router.push('/')">
-          <el-icon><ArrowLeft /></el-icon>
-          返回首页
-        </el-button>
-        <div class="user-menu">
-          <el-dropdown trigger="click">
-            <div class="user-dropdown">
-              <div class="user-avatar">{{ authStore.user?.username?.charAt(0).toUpperCase() || '?' }}</div>
-              <span>{{ authStore.user?.username }}</span>
-              <el-icon><ArrowDown /></el-icon>
-            </div>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item @click="router.push('/chat')">
-                  <el-icon><ChatDotRound /></el-icon>
-                  智能对话
-                </el-dropdown-item>
-                <el-dropdown-item @click="handleLogout" divided>
-                  <el-icon><SwitchButton /></el-icon>
-                  退出登录
-                </el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
+        <div class="nav-tabs">
+          <div class="nav-tab" @click="router.push('/')">
+            <el-icon><HomeFilled /></el-icon>
+            首页
+          </div>
+          <div class="nav-tab" @click="router.push('/chat')">
+            <el-icon><ChatDotRound /></el-icon>
+            智能对话
+          </div>
+          <div class="nav-tab active">
+            <el-icon><TrendCharts /></el-icon>
+            热搜查询
+          </div>
         </div>
+        <el-dropdown trigger="click">
+          <div class="user-dropdown">
+            <div class="user-avatar">{{ authStore.user?.username?.charAt(0).toUpperCase() || '?' }}</div>
+            <span>{{ authStore.user?.username }}</span>
+            <el-icon><ArrowDown /></el-icon>
+          </div>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item @click="handleLogout" divided>
+                <el-icon><SwitchButton /></el-icon>
+                退出登录
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </div>
     </div>
 
@@ -138,7 +142,7 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Search, RefreshLeft, ArrowLeft, ArrowDown, ChatDotRound, SwitchButton } from '@element-plus/icons-vue'
+import { Search, RefreshLeft, ArrowDown, ChatDotRound, SwitchButton, TrendCharts, HomeFilled } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { getWeiboHotSearchCache, type HotSearchCacheItem } from '@/api/hotsearch'
 
@@ -288,16 +292,45 @@ onMounted(() => {
   padding: 12px 24px;
   position: sticky;
   top: 0;
-  z-index: 100;
-  margin: -24px -24px 0 -24px;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  width: 100%;
 }
 
 .nav-content {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  max-width: 1400px;
+  max-width: 1200px;
   margin: 0 auto;
+}
+
+.nav-tabs {
+  display: flex;
+  gap: 12px;
+}
+
+.nav-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: #f3f4f6;
+  border-radius: 8px;
+  transition: all 0.2s;
+  color: #374151;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.nav-tab:hover {
+  background: #e5e7eb;
+}
+
+.nav-tab.active {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
 }
 
 .user-dropdown {
