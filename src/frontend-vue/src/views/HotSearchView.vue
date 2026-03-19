@@ -62,12 +62,6 @@
               <el-tag v-if="row.description_source === 'weibo_detail'" size="small" type="success" style="margin-right: 8px">
                 微博
               </el-tag>
-              <el-tag v-else-if="row.description_source === 'llm'" size="small" type="warning" style="margin-right: 8px">
-                AI
-              </el-tag>
-              <el-tag v-else size="small" type="info" style="margin-right: 8px">
-                其他
-              </el-tag>
               {{ row.title }}
             </div>
           </template>

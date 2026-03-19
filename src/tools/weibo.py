@@ -271,6 +271,11 @@ class WeiboScraper:
 
         parsed_count = 0
         for idx, row in enumerate(rows):
+            # 检查是否已达到限制
+            if parsed_count >= limit:
+                logger.debug(f"   └─ 已达到限制 {limit} 条，停止解析")
+                break
+
             if idx == 0:
                 # 跳过表头
                 if row.find("th"):

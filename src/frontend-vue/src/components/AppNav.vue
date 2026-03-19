@@ -27,6 +27,14 @@
           <el-icon><TrendCharts /></el-icon>
           热搜查询
         </div>
+        <div
+          class="nav-tab"
+          :class="{ 'nav-tab--active': activeRoute === '/weibo-manage' }"
+          @click="navigateTo('/weibo-manage')"
+        >
+          <el-icon><Tools /></el-icon>
+          热搜管理
+        </div>
       </div>
 
       <!-- User Dropdown -->
@@ -46,6 +54,10 @@
               <el-icon><TrendCharts /></el-icon>
               热搜查询
             </el-dropdown-item>
+            <el-dropdown-item command="/weibo-manage">
+              <el-icon><Tools /></el-icon>
+              热搜管理
+            </el-dropdown-item>
             <el-dropdown-item command="logout" divided>
               <el-icon><SwitchButton /></el-icon>
               退出登录
@@ -61,7 +73,7 @@
 import { computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElIcon, ElDropdown, ElDropdownMenu, ElDropdownItem } from 'element-plus'
-import { ArrowDown, SwitchButton, ChatDotRound, TrendCharts, HomeFilled } from '@element-plus/icons-vue'
+import { ArrowDown, SwitchButton, ChatDotRound, TrendCharts, HomeFilled, Tools } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 
 interface Props {
@@ -161,6 +173,10 @@ const handleCommand = (command: string) => {
 .nav-tab--active.app-nav--transparent .nav-tab {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
+}
+
+.nav-tab--active:hover {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
 }
 
 .user-dropdown {

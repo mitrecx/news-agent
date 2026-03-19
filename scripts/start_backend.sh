@@ -8,7 +8,7 @@ trap stop_db_tunnel EXIT INT TERM
 
 PORT=8000
 DB_PORT=5432
-DB_TUNNEL_HOST="jo.mitrecx.top"
+DB_TUNNEL_HOST="shenzhi@47.100.74.209"
 DB_REMOTE_HOST="localhost"  # 数据库在远程服务器上的地址
 
 echo "🚀 Starting News Agent backend..."

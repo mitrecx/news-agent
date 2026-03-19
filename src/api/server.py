@@ -352,6 +352,167 @@ async def delete_expired_cache(current_user: User = Depends(get_current_user)):
     return {"message": f"Deleted {deleted_count} expired cache entries", "count": deleted_count}
 
 
+@app.get("/api/weibo/cache/missing")
+async def get_missing_descriptions(current_user: User = Depends(get_current_user)):
+    """
+    Get statistics of hot search items missing descriptions
+
+    Args:
+        current_user: Authenticated user
+
+    Returns:
+        Statistics including total count and list of items without descriptions
+    """
+    async with db.pool.acquire() as conn:
+        # 获取没有描述的热搜统计
+        stats = await conn.fetchrow("""
+            SELECT
+                COUNT(*) as total_items,
+                COUNT(*) FILTER (WHERE description IS NULL OR description = '') as missing_count,
+                COUNT(*) FILTER (WHERE description IS NOT NULL AND description != '') as has_description_count
+            FROM weibo_hot_search_cache
+            WHERE expires_at > NOW()
+        """)
+
+        # 获取没有描述的热搜列表（最多返回20条用于展示）
+        missing_items = await conn.fetch("""
+            SELECT title, created_at
+            FROM weibo_hot_search_cache
+            WHERE (description IS NULL OR description = '')
+              AND expires_at > NOW()
+            ORDER BY created_at DESC
+            LIMIT 20
+        """)
+
+        return {
+            "total_items": stats["total_items"],
+            "missing_count": stats["missing_count"],
+            "has_description_count": stats["has_description_count"],
+            "missing_items": [
+                {
+                    "title": row["title"],
+                    "created_at": row["created_at"].isoformat() if row["created_at"] else None
+                }
+                for row in missing_items
+            ]
+        }
+
+
+@app.post("/api/weibo/cache/fetch-missing")
+async def fetch_missing_descriptions(
+    limit: int = 10,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Manually trigger fetching descriptions for items missing descriptions
+
+    Args:
+        limit: Maximum number of items to process (default: 10)
+        current_user: Authenticated user
+
+    Returns:
+        Task results with success/failure information
+    """
+    from ..tasks.weibo_tasks import fetch_and_update_description
+
+    # 获取没有描述的热搜
+    async with db.pool.acquire() as conn:
+        missing_items = await conn.fetch("""
+            SELECT title
+            FROM weibo_hot_search_cache
+            WHERE (description IS NULL OR description = '')
+              AND expires_at > NOW()
+            ORDER BY created_at ASC
+            LIMIT $1
+        """, limit)
+
+    if not missing_items:
+        return {
+            "message": "No items missing descriptions",
+            "total_queued": 0,
+            "items": []
+        }
+
+    # 触发Celery任务
+    results = []
+    for idx, item in enumerate(missing_items):
+        # 注意：由于数据库中没有存储url和rank，我们传递空值
+        # 任务内部会重新抓取热搜列表来获取这些信息
+        task = fetch_and_update_description.delay(
+            title=item["title"],
+            url="",  # 空值，任务会重新获取
+            rank=idx + 1  # 使用临时排名
+        )
+        results.append({
+            "title": item["title"],
+            "task_id": task.id,
+            "status": "queued"
+        })
+
+    return {
+        "message": f"Queued {len(results)} tasks to fetch descriptions",
+        "total_queued": len(results),
+        "items": results
+    }
+
+
+@app.post("/api/weibo/cache/fetch-hot-search")
+async def fetch_hot_search(
+    limit: int = 50,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Manually trigger fetching weibo hot search titles
+
+    Args:
+        limit: Maximum number of hot search items to fetch (default: 50)
+        current_user: Authenticated user
+
+    Returns:
+        Task result with statistics and detailed item status
+    """
+    from ..tasks.weibo_tasks import _fetch_and_save_hot_search_titles_async
+    import concurrent.futures
+    import asyncio
+
+    # 在后台线程中执行任务（避免Celery配置问题）
+    def run_in_background():
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(
+                    _fetch_and_save_hot_search_titles_async(limit)
+                )
+                logger.info(f"✅ 后台抓取任务完成: total_fetched={result.get('total_fetched')}, new_items={result.get('new_items')}")
+                return result
+            finally:
+                loop.close()
+        except Exception as e:
+            logger.error(f"❌ 后台抓取任务失败: {e}", exc_info=True)
+            return {
+                'total_fetched': 0,
+                'new_items': 0,
+                'cached_items': 0,
+                'description_tasks_queued': 0,
+                'items': [],
+                'error': str(e)
+            }
+
+    # 使用 ThreadPoolExecutor 在后台线程执行任务并等待结果
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(run_in_background)
+        result = future.result(timeout=60)  # 最多等待60秒
+
+    return {
+        "message": "抓取完成",
+        "task_id": f"manual-{int(asyncio.get_event_loop().time())}",
+        "limit": limit,
+        "status": "completed",
+        **result
+    }
+
+
 # ========== Helper function to generate conversation title ==========
 
 async def generate_title_with_ai(first_message: str, first_response: str) -> str:
