@@ -20,12 +20,6 @@ async def fetch_weibo_hot_search(limit: int = 40) -> str:
 
     Returns:
         格式化的热搜列表（包含描述）
-
-    注意：
-    - 描述通过爬取微博详情页内容 + LLM 总结生成
-    - 需要在 .env 中配置 WEIBO_COOKIE 才能生成描述
-    - 描述在后台异步生成，首次请求可能不含描述
-    - 配置 Cookie 请参考: docs/WEIBO_COOKIE_SETUP.md
     """
     if limit < 1:
         limit = 10

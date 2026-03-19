@@ -175,7 +175,7 @@ async def _fetch_and_update_description_async(title: str, url: str, rank: int):
     """
     from ..tools.weibo import get_scraper, HotSearchItem
     from ..tools.weibo_cache import WeiboHotSearchCache
-    from ..tools.llm_summary import summarize_weibo_content, summarize_from_title
+    from ..tools.llm_summary import summarize_weibo_content
     from ..agent.config import get_settings
 
     settings = get_settings()
@@ -213,71 +213,62 @@ async def _fetch_and_update_description_async(title: str, url: str, rank: int):
         if content:
             logger.debug(f"  ✓ 爬取到微博内容，长度: {len(content)} 字符")
             description = await summarize_weibo_content(title, content)
-            description_source = "weibo_detail"
+            if description:
+                description_source = "weibo_detail"
+            else:
+                description = None
+                description_source = None
         else:
-            # 降级：使用基于标题的推断
-            logger.warning(f"  ⚠️ 未获取到微博内容，使用标题推断: {title}")
-            description = await summarize_from_title(title)
-            description_source = "inferred"
+            # 未获取到内容，描述留空
+            logger.warning(f"  ⚠️ 未获取到微博内容，描述留空: {title}")
+            description = None
+            description_source = None
 
-        # 5. 保存到数据库
-        cache = WeiboHotSearchCache(pool)
-        await cache.set(
-            title=title,
-            description=description,
-            description_source=description_source
-        )
-
-        logger.info(f"✅ 描述生成成功：[{rank}] {title[:30]}... ({description_source})")
-        logger.debug(f"  描述: {description[:100]}...")
-
-        return {
-            'title': title,
-            'rank': rank,
-            'success': True,
-            'description': description,
-            'description_source': description_source,
-            'timestamp': datetime.now().isoformat()
-        }
-
-    except Exception as e:
-        logger.error(f"❌ 描述生成失败：{title}, 错误: {e}", exc_info=True)
-
-        # 使用基于标题的推断作为降级方案
-        try:
-            logger.info(f"  🔄 尝试降级方案：基于标题推断")
-            description = await summarize_from_title(title)
-
+        # 5. 保存到数据库（仅当有描述时）
+        if description:
             cache = WeiboHotSearchCache(pool)
             await cache.set(
                 title=title,
                 description=description,
-                description_source="error_inferred"
+                description_source=description_source
             )
 
-            logger.info(f"✅ 降级方案成功：{title[:30]}...")
+            logger.info(f"✅ 描述生成成功：[{rank}] {title[:30]}... ({description_source})")
+            logger.debug(f"  描述: {description[:100]}...")
 
             return {
                 'title': title,
                 'rank': rank,
                 'success': True,
                 'description': description,
-                'description_source': 'error_inferred',
+                'description_source': description_source,
                 'timestamp': datetime.now().isoformat()
             }
-
-        except Exception as fallback_error:
-            logger.error(f"❌ 降级方案也失败：{fallback_error}")
+        else:
+            logger.warning(f"⚠️ 描述生成失败：[{rank}] {title[:30]}... (无描述)")
 
             return {
                 'title': title,
                 'rank': rank,
                 'success': False,
                 'description': None,
-                'description_source': 'error',
-                'error': str(e),
+                'description_source': None,
                 'timestamp': datetime.now().isoformat()
             }
+
+    except Exception as e:
+        logger.error(f"❌ 描述生成失败：{title}, 错误: {e}", exc_info=True)
+
+        # 描述留空，不使用降级方案
+        return {
+            'title': title,
+            'rank': rank,
+            'success': False,
+            'description': None,
+            'description_source': None,
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }
 
     finally:
         await pool.close()
@@ -302,15 +293,15 @@ def fetch_and_update_description(self, title: str, url: str, rank: int):
     1. 调用 WeiboScraper._fetch_item_content() 爬取微博内容
     2. 调用 LLM 生成描述（summarize_weibo_content）
     3. 更新数据库记录（使用 WeiboHotSearchCache.set()）
-    4. 失败时自动重试（最多3次），降级为基于标题的推断
+    4. 失败时自动重试（最多3次），描述留空
 
     Returns:
         dict: {
             'title': str,
             'rank': int,
             'success': bool,
-            'description': str,
-            'description_source': str,  # 'weibo_detail' | 'inferred' | 'error_inferred' | 'error'
+            'description': str | None,
+            'description_source': str | None,  # 'weibo_detail' | None
             'timestamp': str
         }
     """

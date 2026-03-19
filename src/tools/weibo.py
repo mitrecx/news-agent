@@ -803,47 +803,35 @@ class WeiboScraper:
                     if content:
                         from .llm_summary import summarize_weibo_content
                         description = await summarize_weibo_content(item.title, content)
-                        item.description = description
-                        item.description_source = "weibo_detail"
-                        item.description_generated_at = datetime.now()
+                        if description:
+                            item.description = description
+                            item.description_source = "weibo_detail"
+                            item.description_generated_at = datetime.now()
 
-                        # ✅ 保存到数据库缓存
-                        await self._cache_manager.set(
-                            title=item.title,
-                            description=description,
-                            description_source="weibo_detail"
-                        )
+                            # ✅ 保存到数据库缓存
+                            await self._cache_manager.set(
+                                title=item.title,
+                                description=description,
+                                description_source="weibo_detail"
+                            )
 
-                        print(f"  ✓ {description[:60]}...")
+                            print(f"  ✓ {description[:60]}...")
+                        else:
+                            # 如果没有生成描述，留空
+                            logger.warning(f"未生成描述: {item.title}")
+                            item.description = None
+                            item.description_source = None
                     else:
-                        # 如果没有获取到内容，使用基于标题的 LLM 推断
-                        logger.warning(f"未获取到微博内容，使用标题推断: {item.title}")
-                        from .llm_summary import summarize_from_title
-                        description = await summarize_from_title(item.title)
-                        item.description = description
-                        item.description_source = "inferred"
-
-                        # ✅ 保存推断描述到缓存
-                        await self._cache_manager.set(
-                            title=item.title,
-                            description=description,
-                            description_source="inferred"
-                        )
-
-                        print(f"  ⚠ {description[:60]}...")
+                        # 如果没有获取到内容，描述留空
+                        logger.warning(f"未获取到微博内容，描述留空: {item.title}")
+                        item.description = None
+                        item.description_source = None
 
                 except Exception as e:
                     logger.warning(f"  ✗ 失败: {item.title}, 错误: {e}")
-                    # 使用基于标题的推断作为降级方案
-                    try:
-                        from .llm_summary import summarize_from_title
-                        description = await summarize_from_title(item.title)
-                        item.description = description
-                        item.description_source = "error_inferred"
-                    except Exception:
-                        # 如果推断也失败，使用简单降级
-                        item.description = f"微博热门话题：{item.title}"
-                        item.description_source = "error"
+                    # 描述留空
+                    item.description = None
+                    item.description_source = None
 
                 # 避免请求过快
                 await asyncio.sleep(1.0)
