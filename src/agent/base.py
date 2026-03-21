@@ -63,7 +63,7 @@ class NewsAgent:
         # Add current message
         messages.append(("human", message))
 
-        # Use LLM with tools if available
+        # Use LLM with tools if available (system prompt is added in _process_with_tools)
         response = await self._process_with_tools(messages)
         return response
 
@@ -77,10 +77,23 @@ class NewsAgent:
         Returns:
             Final response text
         """
-        from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+        from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
+
+        # 添加系统提示
+        system_prompt = """你是一个智能新闻助手，可以帮助用户获取微博热搜信息。
+
+你有一个工具可以使用：fetch_weibo_hot_search（获取微博热搜榜）
+
+重要规则：
+1. 当用户询问微博热搜、热门话题、今日热点、最新新闻等时，必须直接调用 fetch_weibo_hot_search 工具
+2. 不要只回复"我可以帮你获取热搜"或类似的话语，而是直接调用工具
+3. 将工具返回的结果直接呈现给用户
+4. 如果用户的问题与获取热搜无关，正常回答即可"""
+
+        # 添加系统消息作为第一条消息
+        lc_messages = [SystemMessage(content=system_prompt)]
 
         # Convert messages to LangChain format
-        lc_messages = []
         for role, content in messages:
             if role == "human":
                 lc_messages.append(HumanMessage(content=content))
@@ -151,8 +164,20 @@ class NewsAgent:
         # Add current message
         messages.append(("human", message))
 
+        # 添加系统提示
+        from langchain_core.messages import SystemMessage
+        system_prompt = """你是一个智能新闻助手，可以帮助用户获取微博热搜信息。
+
+你有一个工具可以使用：fetch_weibo_hot_search（获取微博热搜榜）
+
+重要规则：
+1. 当用户询问微博热搜、热门话题、今日热点、最新新闻等时，必须直接调用 fetch_weibo_hot_search 工具
+2. 不要只回复"我可以帮你获取热搜"或类似的话语，而是直接调用工具
+3. 将工具返回的结果直接呈现给用户
+4. 如果用户的问题与获取热搜无关，正常回答即可"""
+
         # Convert to LangChain format
-        lc_messages = []
+        lc_messages = [SystemMessage(content=system_prompt)]
         for role, content in messages:
             if role == "human":
                 lc_messages.append(HumanMessage(content=content))

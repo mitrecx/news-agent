@@ -285,6 +285,7 @@ class WeiboScraper:
         print(f"   └─ 找到 {len(rows)} 行数据")
 
         parsed_count = 0
+        ad_count = 0
         for idx, row in enumerate(rows):
             # 检查是否已达到限制
             if parsed_count >= limit:
@@ -302,17 +303,22 @@ class WeiboScraper:
                 continue
 
             try:
-                # 解析排名
-                rank_cell = cells[0]
-                rank = rank_cell.get_text(strip=True)
-                if not rank.isdigit():
-                    # 尝试从 class 获取排名
-                    rank = str(idx)
-
                 # 解析标题和链接
                 title_cell = cells[1]
                 link = title_cell.find("a")
                 if not link:
+                    continue
+
+                # 解析排名
+                rank_cell = cells[0]
+                rank = rank_cell.get_text(strip=True)
+
+                # 广告检测：如果排名单元格没有数字，就是广告
+                if not rank.isdigit():
+                    ad_count += 1
+                    title_text = link.get_text(strip=True)
+                    logger.info(f"   🚫 过滤广告（无数字排名）: {title_text[:50]}...")
+                    print(f"   🚫 过滤广告（无数字排名）: {title_text[:50]}...")
                     continue
 
                 title = link.get_text(strip=True)
@@ -354,7 +360,7 @@ class WeiboScraper:
                     category = category_cell.get_text(strip=True)
 
                 item = HotSearchItem(
-                    rank=int(rank) if rank.isdigit() else idx,
+                    rank=int(rank),
                     title=title,
                     hot_value=hot_value,
                     category=category,
@@ -369,6 +375,10 @@ class WeiboScraper:
                 # 跳过解析失败的行
                 logger.debug(f"   ⚠️ 跳过第 {idx} 行: {e}")
                 continue
+
+        if ad_count > 0:
+            logger.info(f"🚫 已过滤 {ad_count} 条广告热搜")
+            print(f"   └─ 过滤广告: {ad_count} 条")
 
         logger.info(f"✅ 成功解析 {len(items)} 条热搜")
         return items
