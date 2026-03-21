@@ -264,6 +264,57 @@ class WeiboHotSearchCache:
             logger.info(f"✓ Deleted {count} expired cache entries")
             return count
 
+    async def delete(self, title: str) -> bool:
+        """
+        删除指定标题的热搜
+
+        Args:
+            title: 热搜标题
+
+        Returns:
+            True 如果删除成功，False 如果记录不存在
+        """
+        async with await self._get_connection() as conn:
+            title_hash = self.hash_title(title)
+            result = await conn.execute(
+                "DELETE FROM weibo_hot_search_cache WHERE title_hash = $1",
+                title_hash
+            )
+
+            # 解析 "DELETE n" 返回值
+            count = int(result.split()[-1])
+            if count > 0:
+                logger.info(f"✓ Deleted hot search: {title[:30]}...")
+                return True
+            else:
+                logger.debug(f"✗ Hot search not found: {title[:30]}...")
+                return False
+
+    async def batch_delete(self, titles: List[str]) -> int:
+        """
+        批量删除热搜
+
+        Args:
+            titles: 热搜标题列表
+
+        Returns:
+            删除的行数
+        """
+        if not titles:
+            return 0
+
+        async with await self._get_connection() as conn:
+            title_hashes = [self.hash_title(title) for title in titles]
+            result = await conn.execute(
+                "DELETE FROM weibo_hot_search_cache WHERE title_hash = ANY($1::varchar(64)[])",
+                title_hashes
+            )
+
+            # 解析 "DELETE n" 返回值
+            count = int(result.split()[-1])
+            logger.info(f"✓ Batch deleted {count} hot searches")
+            return count
+
     async def get_stats(self) -> dict:
         """
         获取缓存统计信息

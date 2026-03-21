@@ -29,14 +29,6 @@
         </div>
         <div
           class="nav-tab"
-          :class="{ 'nav-tab--active': activeRoute === '/weibo-manage' }"
-          @click="navigateTo('/weibo-manage')"
-        >
-          <el-icon><Tools /></el-icon>
-          热搜管理
-        </div>
-        <div
-          class="nav-tab"
           :class="{ 'nav-tab--active': activeRoute === '/weibo-login' }"
           @click="navigateTo('/weibo-login')"
         >
@@ -62,10 +54,6 @@
               <el-icon><TrendCharts /></el-icon>
               热搜查询
             </el-dropdown-item>
-            <el-dropdown-item command="/weibo-manage">
-              <el-icon><Tools /></el-icon>
-              热搜管理
-            </el-dropdown-item>
             <el-dropdown-item command="/weibo-login">
               <el-icon><Key /></el-icon>
               微博登录
@@ -85,7 +73,7 @@
 import { computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElIcon, ElDropdown, ElDropdownMenu, ElDropdownItem } from 'element-plus'
-import { ArrowDown, SwitchButton, ChatDotRound, TrendCharts, HomeFilled, Tools, Key } from '@element-plus/icons-vue'
+import { ArrowDown, SwitchButton, ChatDotRound, TrendCharts, HomeFilled, Key } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 
 interface Props {

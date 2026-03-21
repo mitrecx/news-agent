@@ -95,6 +95,27 @@ export const getMissingDescriptionStats = () => {
   return request.get<MissingDescriptionStats>('/weibo/cache/missing')
 }
 
+/** 有描述的热搜条目 */
+export interface HasDescriptionItem {
+  title: string
+  description: string
+  description_source: string
+  created_at: string
+  updated_at: string
+}
+
+/** 有描述的热搜响应 */
+export interface HasDescriptionResponse {
+  items: HasDescriptionItem[]
+}
+
+/** 获取有描述的热搜列表 */
+export const getHasDescriptionItems = (params?: {
+  limit?: number
+}) => {
+  return request.get<HasDescriptionResponse>('/weibo/cache/has-description', { params })
+}
+
 /** 手动触发抓取缺失描述的任务 */
 export const fetchMissingDescriptions = (params: {
   limit?: number
@@ -112,4 +133,14 @@ export const fetchHotSearch = (params: {
   limit?: number
 }) => {
   return request.post<FetchHotSearchResponse>('/weibo/cache/fetch-hot-search', null, { params })
+}
+
+/** 删除单个热搜 */
+export const deleteHotSearch = (title: string) => {
+  return request.delete<{message: string, title: string}>(`/weibo/cache/item/${encodeURIComponent(title)}`)
+}
+
+/** 批量删除热搜 */
+export const batchDeleteHotSearches = (titles: string[]) => {
+  return request.delete<{message: string, count: number, requested: number}>('/weibo/cache/batch', { data: { titles } })
 }

@@ -1,8 +1,44 @@
 """LLM 总结工具 - 为微博热搜生成描述"""
 
 import logging
+import re
 
 logger = logging.getLogger(__name__)
+
+
+def clean_description_text(text: str) -> str:
+    """
+    清理描述文本，删除换行符和多余空行，智能添加标点符号
+
+    Args:
+        text: 原始文本
+
+    Returns:
+        清理后的文本
+    """
+    # 定义中文结束标点符号
+    ending_punctuation = {'。', '！', '？', '；', '：', '.', '!', '?', ';', ':'}
+
+    # 第一步：将所有换行符和连续空格替换为单个空格
+    text = re.sub(r'\s+', ' ', text)
+
+    # 第二步：智能处理标点符号
+    # 匹配模式：标点 + 空格 + 非标点字符
+    # 如果标点后面跟着非标点字符，确保有空格
+    text = re.sub(r'([。！？；：.!?;:])\s*([^。！？；：.!?;:\s])', r'\1 \2', text)
+
+    # 第三步：处理缺少标点的情况
+    # 如果两个句子之间只有空格没有标点，添加句号
+    # 检测：中文字符/英文字母 + 空格 + 中文字符/英文字母（且前面不是标点）
+    text = re.sub(r'([\u4e00-\u9fff\w])\s+([\u4e00-\u9fff\w])', r'\1 \2', text)
+
+    # 第四步：删除多余的空格（只保留单词间的一个空格）
+    text = re.sub(r' +', ' ', text)
+
+    # 第五步：删除首尾空格
+    text = text.strip()
+
+    return text
 
 
 async def summarize_weibo_content(title: str, content: str) -> str | None:
@@ -63,6 +99,9 @@ async def summarize_weibo_content(title: str, content: str) -> str | None:
 
         description = result.content.strip()
 
+        # 清理描述文本：删除换行符和空行
+        description = clean_description_text(description)
+
         # 确保长度合理
         if len(description) > 550:
             description = description[:550] + "..."
@@ -75,7 +114,9 @@ async def summarize_weibo_content(title: str, content: str) -> str | None:
 
         # 降级方案：截取内容
         if content and len(content) > 100:
-            truncated_content = content[:500] + "..." if len(content) > 500 else content
+            # 清理内容中的换行符
+            cleaned_content = clean_description_text(content)
+            truncated_content = cleaned_content[:500] + "..." if len(cleaned_content) > 500 else cleaned_content
             return "截断: " + truncated_content
         else:
             return None

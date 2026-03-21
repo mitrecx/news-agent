@@ -25,11 +25,6 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
-      path: '/weibo-manage',
-      component: () => import('@/views/WeiboManageView.vue'),
-      meta: { requiresAuth: true },
-    },
-    {
       path: '/weibo-login',
       component: () => import('@/views/WeiboLoginView.vue'),
       meta: { requiresAuth: true },

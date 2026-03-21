@@ -1,10 +1,11 @@
 """FastAPI server for news agent"""
 
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Body
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from contextlib import asynccontextmanager
 from datetime import datetime
+from typing import List
 import os
 import json
 import logging
@@ -355,6 +356,58 @@ async def delete_expired_cache(current_user: User = Depends(get_current_user)):
     return {"message": f"Deleted {deleted_count} expired cache entries", "count": deleted_count}
 
 
+@app.delete("/api/weibo/cache/item/{title}")
+async def delete_hot_search(title: str, current_user: User = Depends(get_current_user)):
+    """
+    Delete a specific hot search by title
+
+    Args:
+        title: Hot search title (URL encoded)
+        current_user: Authenticated user
+
+    Returns:
+        Success message with deletion status
+    """
+    cache = WeiboHotSearchCache(pool=db.pool)
+    deleted = await cache.delete(title)
+
+    if deleted:
+        return {"message": f"Deleted hot search: {title}", "title": title}
+    else:
+        raise HTTPException(status_code=404, detail="Hot search not found")
+
+
+@app.delete("/api/weibo/cache/batch")
+async def batch_delete_hot_searches(
+    titles: List[str] = Body(..., embed=True),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Batch delete hot searches by titles
+
+    Args:
+        titles: List of hot search titles
+        current_user: Authenticated user
+
+    Returns:
+        Success message with deletion count
+    """
+    if not titles:
+        raise HTTPException(status_code=400, detail="titles list is empty")
+
+    cache = WeiboHotSearchCache(pool=db.pool)
+    deleted_count = await cache.batch_delete(titles)
+
+    if deleted_count == 0:
+        raise HTTPException(status_code=404, detail="No hot searches found")
+
+    return {
+        "message": f"Deleted {deleted_count} hot searches",
+        "count": deleted_count,
+        "requested": len(titles)
+    }
+
+
 @app.get("/api/weibo/cache/missing")
 async def get_missing_descriptions(current_user: User = Depends(get_current_user)):
     """
@@ -397,6 +450,46 @@ async def get_missing_descriptions(current_user: User = Depends(get_current_user
                     "created_at": row["created_at"].isoformat() if row["created_at"] else None
                 }
                 for row in missing_items
+            ]
+        }
+
+
+@app.get("/api/weibo/cache/has-description")
+async def get_has_description_items(
+    limit: int = 20,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get list of hot search items that have descriptions
+
+    Args:
+        limit: Number of items to return (default: 20)
+        current_user: Authenticated user
+
+    Returns:
+        List of items with descriptions
+    """
+    async with db.pool.acquire() as conn:
+        # 获取有描述的热搜列表
+        items = await conn.fetch("""
+            SELECT title, description, description_source, created_at, updated_at
+            FROM weibo_hot_search_cache
+            WHERE description IS NOT NULL AND description != ''
+              AND expires_at > NOW()
+            ORDER BY updated_at DESC
+            LIMIT $1
+        """, limit)
+
+        return {
+            "items": [
+                {
+                    "title": row["title"],
+                    "description": row["description"],
+                    "description_source": row["description_source"],
+                    "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                    "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None
+                }
+                for row in items
             ]
         }
 
