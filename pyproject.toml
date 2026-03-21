@@ -25,6 +25,7 @@ dependencies = [
     "sqlalchemy>=2.0.36",
     "celery>=5.4.0",
     "redis>=5.2.1",
+    "undetected-chromedriver>=3.5.5",
 ]
 
 [project.optional-dependencies]

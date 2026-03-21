@@ -27,3 +27,17 @@ class HealthResponse(BaseModel):
     """Health check response"""
     status: str = "ok"
     agent_ready: bool
+
+
+class WeiboLoginRequest(BaseModel):
+    """Weibo login request"""
+    username: str = Field(..., description="Weibo username or phone number")
+    password: str = Field(..., description="Weibo password")
+
+
+class WeiboLoginResponse(BaseModel):
+    """Weibo login response"""
+    success: bool = Field(..., description="Login success status")
+    cookie: Optional[str] = Field(None, description="Extracted Weibo cookie")
+    message: str = Field(..., description="Status message")
+    error: Optional[str] = Field(None, description="Error details if failed")

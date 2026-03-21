@@ -174,21 +174,41 @@
           </el-divider>
           <div class="results-summary">
             <el-tag type="success" size="large">
-              已触发 {{ taskResults.length }} 个任务
+              成功 {{ taskSuccessCount }} 条
             </el-tag>
-            <span class="note">任务将在后台异步执行，请稍后刷新查看结果</span>
+            <el-tag v-if="taskFailedCount > 0" type="danger" size="large">
+              失败 {{ taskFailedCount }} 条
+            </el-tag>
+            <span class="note">共 {{ taskResults.length }} 个任务</span>
           </div>
-          <el-table :data="taskResults" class="results-table" max-height="300">
-            <el-table-column prop="title" label="热搜标题" min-width="200" show-overflow-tooltip />
-            <el-table-column prop="task_id" label="任务ID" width="180" />
-            <el-table-column prop="status" label="状态" width="100">
+          <el-table :data="taskResults" class="results-table" max-height="400" stripe>
+            <el-table-column type="index" label="#" width="60" />
+            <el-table-column prop="title" label="热搜标题" min-width="250" show-overflow-tooltip />
+            <el-table-column label="状态" width="100">
               <template #default="{ row }">
-                <el-tag v-if="row.status === 'queued'" type="info" size="small">
-                  已排队
+                <el-tag v-if="row.status === 'success'" type="success" size="small">
+                  成功
+                </el-tag>
+                <el-tag v-else-if="row.status === 'failed'" type="danger" size="small">
+                  失败
                 </el-tag>
                 <el-tag v-else type="info" size="small">
                   {{ row.status }}
                 </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="描述来源" width="120">
+              <template #default="{ row }">
+                <el-tag v-if="row.description_source" type="info" size="small">
+                  {{ row.description_source === 'weibo_detail' ? '微博详情' : row.description_source }}
+                </el-tag>
+                <span v-else class="text-muted">-</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="error" label="失败原因" min-width="200" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span v-if="row.error" class="error-text">{{ row.error }}</span>
+                <span v-else class="text-muted">-</span>
               </template>
             </el-table-column>
           </el-table>
@@ -232,7 +252,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   Document,
@@ -263,11 +283,19 @@ const loading = ref(false)
 const fetching = ref(false)
 const fetchingHotSearch = ref(false)
 const taskResults = ref<TaskResult[]>([])
-const fetchLimit = ref(10)
+const fetchLimit = ref(3)
 const maxFetchLimit = ref(50)
 const hotSearchLimit = ref(50)
 const maxHotSearchLimit = ref(100)
 const hotSearchResult = ref<FetchHotSearchResponse | null>(null)
+
+// 计算成功和失败数量
+const taskSuccessCount = computed(() =>
+  taskResults.value.filter(r => r.status === 'success').length
+)
+const taskFailedCount = computed(() =>
+  taskResults.value.filter(r => r.status === 'failed').length
+)
 
 // 格式化日期时间
 const formatDateTime = (dateStr: string) => {
@@ -288,7 +316,7 @@ const loadStats = async () => {
   try {
     const response = await getMissingDescriptionStats()
     stats.value = response.data
-    taskResults.value = [] // 清空之前的任务结果
+    // 不清空任务结果，保留历史记录供用户查看
   } catch (error: any) {
     ElMessage.error(error.message || '获取统计数据失败')
     console.error('获取统计数据失败:', error)
@@ -312,12 +340,21 @@ const handleFetchMissing = async () => {
 
     taskResults.value = response.data.items
 
-    if (response.data.total_queued > 0) {
-      ElMessage.success(`已触发 ${response.data.total_queued} 个抓取任务`)
-      // 3秒后自动刷新统计数据
-      setTimeout(() => {
-        loadStats()
-      }, 3000)
+    const successCount = response.data.success_count || 0
+    const failedCount = response.data.failed_count || 0
+    const totalCount = response.data.total_queued
+
+    if (totalCount > 0) {
+      if (failedCount === 0) {
+        ElMessage.success(`批量抓取完成！成功 ${successCount} 条`)
+      } else if (successCount === 0) {
+        ElMessage.error(`批量抓取失败！${failedCount} 条全部失败，请查看详细错误信息`)
+      } else {
+        ElMessage.warning(`批量抓取完成！成功 ${successCount} 条，失败 ${failedCount} 条`)
+      }
+
+      // 不自动刷新统计，保留任务结果显示
+      // 用户可以手动点击"刷新统计"按钮来更新数据
     } else {
       ElMessage.info('没有需要处理的任务')
     }
@@ -546,5 +583,16 @@ onMounted(() => {
   .action-controls .el-input-number {
     width: 100% !important;
   }
+}
+
+/* 错误文本和提示文本样式 */
+.error-text {
+  color: #f56c6c;
+  font-size: 12px;
+}
+
+.text-muted {
+  color: #909399;
+  font-size: 12px;
 }
 </style>

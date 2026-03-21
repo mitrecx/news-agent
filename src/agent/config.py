@@ -27,6 +27,12 @@ class Settings(BaseSettings):
     weibo_scraper_timeout: int = 10
     weibo_cookie: str = ""  # 微博 Cookie，用于绕过 Sina Visitor System 验证
 
+    # 微博热搜描述抓取方案选择
+    # True: 使用 Selenium 爬虫（旧方案，需要 Chrome 浏览器）
+    # False: 使用 HTTP 爬虫（新方案，更轻量）
+    # 注意：两种方案都需要成功获取微博内容，失败则不生成描述
+    use_selenium_for_descriptions: bool = False
+
     # Database
     db_host: str = "localhost"
     db_port: int = 5432

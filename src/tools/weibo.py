@@ -98,6 +98,10 @@ class WeiboScraper:
             "Referer": "https://weibo.com",
         }
 
+        # 如果提供了Cookie，添加到请求头中
+        if self.cookie:
+            self.headers["Cookie"] = self.cookie
+
         # 如果提供了 Cookie，添加到 headers
         if self.cookie:
             self.headers["Cookie"] = self.cookie
@@ -123,10 +127,10 @@ class WeiboScraper:
         try:
             return await asyncio.wait_for(
                 loop.run_in_executor(None, self._selenium_fetch_sync, limit),
-                timeout=30.0  # 30秒超时
+                timeout=60.0  # 60秒超时（增加以提高稳定性）
             )
         except asyncio.TimeoutError:
-            logger.error("❌ Selenium 初始化超时 (30秒)")
+            logger.error("❌ Selenium 初始化超时 (60秒)")
             raise Exception("Selenium 初始化超时，可能 Chrome 浏览器未安装或启动失败")
 
     def _selenium_fetch_sync(self, limit: int) -> List[HotSearchItem]:
@@ -151,7 +155,18 @@ class WeiboScraper:
         chrome_options.add_argument('--disable-dev-shm-usage')
         chrome_options.add_argument('--disable-gpu')
         chrome_options.add_argument('--window-size=1920,1080')
+        chrome_options.add_argument('--disable-blink-features=AutomationControlled')  # 避免被检测为自动化
+        chrome_options.add_argument('--disable-extensions')
+        chrome_options.add_argument('--disable-infobars')
+        chrome_options.add_argument('--disable-notifications')
+        chrome_options.add_argument('--disable-popup-blocking')
+        chrome_options.add_experimental_option('excludeSwitches', ['enable-automation'])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
         chrome_options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+
+        # 设置页面加载超时和脚本超时
+        chrome_options.page_load_timeout = 30
+        chrome_options.script_timeout = 30
 
         # 自动下载并使用 ChromeDriver
         logger.info("📦 安装 ChromeDriver...")

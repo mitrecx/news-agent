@@ -17,6 +17,7 @@ from ..auth import db, router as auth_router, get_current_user
 from ..auth.models import User, Conversation, ConversationUpdate
 from ..auth.conversation_service import ConversationService
 from ..tools.weibo_cache import WeiboHotSearchCache
+from . import weibo_login
 
 # 配置日志
 logging.basicConfig(
@@ -68,6 +69,8 @@ app = FastAPI(
 
 # Include auth router
 app.include_router(auth_router)
+# Include weibo login router
+app.include_router(weibo_login.router)
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -413,12 +416,14 @@ async def fetch_missing_descriptions(
     Returns:
         Task results with success/failure information
     """
-    from ..tasks.weibo_tasks import fetch_and_update_description
+    from ..tasks.weibo_tasks import _fetch_and_update_description_async
+    import concurrent.futures
+    import asyncio
 
-    # 获取没有描述的热搜
+    # 1. 获取没有描述的热搜标题和URL（从数据库）
     async with db.pool.acquire() as conn:
         missing_items = await conn.fetch("""
-            SELECT title
+            SELECT title, url
             FROM weibo_hot_search_cache
             WHERE (description IS NULL OR description = '')
               AND expires_at > NOW()
@@ -428,30 +433,118 @@ async def fetch_missing_descriptions(
 
     if not missing_items:
         return {
-            "message": "No items missing descriptions",
+            "message": "没有需要处理的任务",
             "total_queued": 0,
+            "success_count": 0,
+            "failed_count": 0,
             "items": []
         }
 
-    # 触发Celery任务
-    results = []
+    # 2. 为每个缺失描述的热搜准备任务数据（直接使用数据库中的URL）
+    tasks_data = []
     for idx, item in enumerate(missing_items):
-        # 注意：由于数据库中没有存储url和rank，我们传递空值
-        # 任务内部会重新抓取热搜列表来获取这些信息
-        task = fetch_and_update_description.delay(
-            title=item["title"],
-            url="",  # 空值，任务会重新获取
-            rank=idx + 1  # 使用临时排名
-        )
-        results.append({
-            "title": item["title"],
-            "task_id": task.id,
-            "status": "queued"
-        })
+        title = item["title"]
+        url = item["url"] or ""  # 使用数据库中的URL，可能为空
+        tasks_data.append((title, url, idx + 1))
+
+    has_url_count = sum(1 for _, url, _ in tasks_data if url)
+    logger.info(f"📊 找到 {len(tasks_data)} 条热搜需要处理，其中 {has_url_count} 条有URL")
+
+    # 5. 在后台线程中执行任务
+    def run_single_task(title: str, url: str, rank: int):
+        """在后台线程中执行单个描述抓取任务"""
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(
+                    _fetch_and_update_description_async(title, url, rank)
+                )
+                logger.info(f"✅ 描述任务完成: {title[:30]}..., success={result.get('success')}")
+                return result
+            finally:
+                loop.close()
+        except Exception as e:
+            logger.error(f"❌ 描述任务失败: {title}, 错误: {e}", exc_info=True)
+            return {
+                'title': title,
+                'rank': rank,
+                'success': False,
+                'description': None,
+                'description_source': None,
+                'error': str(e)
+            }
+
+    # 使用 ThreadPoolExecutor 并发执行多个任务
+    results = []
+    completed_count = 0
+    total_count = len(tasks_data)
+
+    logger.info(f"🚀 开始批量抓取描述，共 {total_count} 条热搜")
+
+    # 减少并发数到2，避免资源竞争
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        # 提交所有任务
+        future_to_title = {}
+        for title, url, rank in tasks_data:
+            future = executor.submit(
+                run_single_task,
+                title=title,
+                url=url,  # 使用从热搜列表获取的URL
+                rank=rank
+            )
+            future_to_title[future] = title
+            logger.info(f"📤 已提交任务 [{rank}/{total_count}]: {title[:30]}... (URL: {'有' if url else '无'})")
+
+        # 等待所有任务完成
+        for future in concurrent.futures.as_completed(future_to_title, timeout=600):
+            completed_count += 1
+            title = future_to_title[future]
+            try:
+                result = future.result()
+                success = result.get("success", False)
+                error = result.get("error")
+                description_source = result.get("description_source")
+
+                # 构建详细结果
+                item_result = {
+                    "title": result.get("title", title),
+                    "task_id": f"manual-{int(asyncio.get_event_loop().time())}-{len(results)}",
+                    "status": "success" if success else "failed",
+                    "error": error if not success else None,
+                    "description_source": description_source if success else None,
+                    "rank": result.get("rank")
+                }
+
+                results.append(item_result)
+
+                # 记录进度
+                if success:
+                    logger.info(f"✅ [{completed_count}/{total_count}] {title[:30]}... (来源: {description_source})")
+                else:
+                    logger.warning(f"❌ [{completed_count}/{total_count}] {title[:30]}... 失败: {error}")
+
+            except Exception as e:
+                logger.error(f"❌ 任务执行异常: {title}, 错误: {e}")
+                results.append({
+                    "title": title,
+                    "task_id": f"failed-{len(results)}",
+                    "status": "failed",
+                    "error": str(e),
+                    "description_source": None
+                })
+
+    # 统计结果
+    success_count = sum(1 for r in results if r["status"] == "success")
+    failed_count = len(results) - success_count
+
+    logger.info(f"📊 批量抓取完成: 成功 {success_count} 条，失败 {failed_count} 条")
 
     return {
-        "message": f"Queued {len(results)} tasks to fetch descriptions",
+        "message": "批量抓取完成",
         "total_queued": len(results),
+        "success_count": success_count,
+        "failed_count": failed_count,
         "items": results
     }
 

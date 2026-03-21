@@ -44,7 +44,19 @@ export interface TaskResult {
 export interface FetchMissingResponse {
   message: string
   total_queued: number
+  success_count: number
+  failed_count: number
   items: TaskResult[]
+}
+
+/** 任务结果项 */
+export interface TaskResult {
+  title: string
+  task_id: string
+  status: string
+  error?: string
+  description_source?: string
+  rank?: number
 }
 
 /** 热搜抓取条目状态 */
@@ -87,7 +99,12 @@ export const getMissingDescriptionStats = () => {
 export const fetchMissingDescriptions = (params: {
   limit?: number
 }) => {
-  return request.post<FetchMissingResponse>('/weibo/cache/fetch-missing', null, { params })
+  // 为批量抓取描述设置更长的超时时间（5分钟）
+  // 因为需要处理多个热搜，每个都需要 Selenium + LLM 生成
+  return request.post<FetchMissingResponse>('/weibo/cache/fetch-missing', null, {
+    params,
+    timeout: 300000 // 5分钟超时
+  })
 }
 
 /** 手动触发抓取微博热搜 */

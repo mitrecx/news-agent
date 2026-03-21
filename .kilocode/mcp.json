@@ -1,0 +1,1 @@
+{"mcpServers":{"playwright":{"command":"npx","args":["-y","@playwright/mcp@0.0.38"],"alwaysAllow":["browser_take_screenshot","browser_network_requests","browser_console_messages","browser_close","browser_click","browser_type","browser_wait_for","browser_navigate"]}}}

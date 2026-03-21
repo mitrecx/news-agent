@@ -6,6 +6,7 @@ alwaysApply: true
 # CLAUDE.md
 
 本文件为 Claude Code (claude.ai/code) 在此代码库中工作时提供指导。
+每次修改完代码, 必须运算 deploy.sh 脚本把服务部署到服务器上, 然后在浏览器里测试一遍.
 
 ## 项目概述
 

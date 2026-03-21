@@ -4,7 +4,7 @@ import { ElMessage } from 'element-plus'
 /** Create axios instance with base configuration */
 const request: AxiosInstance = axios.create({
   baseURL: '/api',
-  timeout: 30000,
+  timeout: 60000, // 60秒 - 一般请求的超时时间
   headers: {
     'Content-Type': 'application/json',
   },

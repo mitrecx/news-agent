@@ -71,6 +71,24 @@ class WeiboHotSearchCache:
         """
         return hashlib.sha256(title.encode('utf-8')).hexdigest()
 
+    async def get_url(self, title: str) -> Optional[str]:
+        """
+        获取热搜URL
+
+        Args:
+            title: 热搜标题
+
+        Returns:
+            URL字符串，如果不存在返回None
+        """
+        async with await self._get_connection() as conn:
+            title_hash = self.hash_title(title)
+            url = await conn.fetchval(
+                "SELECT url FROM weibo_hot_search_cache WHERE title_hash = $1",
+                title_hash
+            )
+            return url
+
     async def get(self, title: str) -> Optional[dict]:
         """
         获取热搜描述缓存
@@ -307,12 +325,13 @@ class WeiboHotSearchCache:
             )
             return {row['title'] for row in rows}
 
-    async def insert_initial(self, title: str) -> bool:
+    async def insert_initial(self, title: str, url: str = "") -> bool:
         """
         插入初始热搜记录（描述为空）
 
         Args:
             title: 热搜标题
+            url: 热搜链接（可选）
 
         Returns:
             True 如果插入成功，False 如果记录已存在
@@ -325,10 +344,10 @@ class WeiboHotSearchCache:
             # 使用 INSERT ... ON CONFLICT DO NOTHING
             result = await conn.execute(
                 """INSERT INTO weibo_hot_search_cache
-                   (title_hash, title, description, description_source, created_at, updated_at, expires_at)
-                   VALUES ($1, $2, '', '', $3, $3, $4)
+                   (title_hash, title, description, description_source, url, created_at, updated_at, expires_at)
+                   VALUES ($1, $2, '', '', $3, $4, $4, $5)
                    ON CONFLICT (title_hash) DO NOTHING""",
-                title_hash, title, now, expires_at
+                title_hash, title, url, now, expires_at
             )
 
             # 解析 "INSERT 0 1" 返回值
