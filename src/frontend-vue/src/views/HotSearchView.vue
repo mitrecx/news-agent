@@ -97,6 +97,12 @@
             <el-button @click="handleReset" :icon="RefreshLeft">
               重置
             </el-button>
+            <el-button
+              @click="toggleAllDescriptions"
+              :type="allExpanded ? 'primary' : 'default'"
+            >
+              {{ allExpanded ? '全部收起' : '全部展开' }}
+            </el-button>
           </el-form-item>
         </el-form>
       </template>
@@ -118,7 +124,7 @@
             >
               批量删除
             </el-button>
-            <el-button @click="selectedItems = []">
+            <el-button @click="handleClearSelection">
               取消选择
             </el-button>
           </template>
@@ -126,6 +132,7 @@
       </div>
 
       <el-table
+        ref="tableRef"
         :data="cacheItems"
         v-loading="loading"
         stripe
@@ -134,7 +141,7 @@
         @selection-change="handleSelectionChange"
       >
         <el-table-column type="selection" width="55" />
-        <el-table-column type="index" label="#" width="60" :index="indexMethod" />
+        <el-table-column type="index" label="#" width="80" :index="indexMethod" class-name="index-column" />
 
         <el-table-column prop="title" label="热搜标题" min-width="200">
           <template #default="{ row }">
@@ -161,7 +168,24 @@
 
         <el-table-column prop="description" label="描述" min-width="500">
           <template #default="{ row }">
-            <div class="description-cell">{{ row.description || '-' }}</div>
+            <div class="description-cell-wrapper">
+              <div
+                class="description-cell"
+                :class="isDescriptionExpanded(row.title) ? '' : 'description-compact'"
+              >
+                {{ row.description || '-' }}
+              </div>
+              <el-button
+                v-if="row.description && row.description.length > 100"
+                type="primary"
+                link
+                size="small"
+                @click="toggleDescription(row.title)"
+                class="toggle-btn"
+              >
+                {{ isDescriptionExpanded(row.title) ? '收起' : '展开' }}
+              </el-button>
+            </div>
           </template>
         </el-table-column>
 
@@ -190,11 +214,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Search, RefreshLeft, Download, Lightning, Delete } from '@element-plus/icons-vue'
 import { getWeiboHotSearchCache, fetchMissingDescriptions, fetchHotSearch, deleteHotSearch, batchDeleteHotSearches, type HotSearchCacheItem } from '@/api/hotsearch'
 import AppNav from '@/components/AppNav.vue'
+import type { ElTable } from 'element-plus'
+
+// 表格引用
+const tableRef = ref<InstanceType<typeof ElTable>>()
 
 // 数据
 const cacheItems = ref<HotSearchCacheItem[]>([])
@@ -214,6 +242,15 @@ const hotSearchLimit = ref(50)
 const selectedItems = ref<string[]>([])
 const deleting = ref(false)
 const deletingItem = ref<string | null>(null)
+
+// 展开的描述行（使用 title 作为唯一标识）
+const expandedDescriptions = ref<Set<string>>(new Set())
+
+// 检查当前页所有项是否都已展开
+const allExpanded = computed(() => {
+  if (cacheItems.value.length === 0) return false
+  return cacheItems.value.every(item => expandedDescriptions.value.has(item.title))
+})
 
 // 过滤条件
 const filters = ref({
@@ -322,6 +359,12 @@ const handleSizeChange = () => {
 // 处理选择变化
 const handleSelectionChange = (selection: any[]) => {
   selectedItems.value = selection.map((item: any) => item.title)
+}
+
+// 处理清除选择
+const handleClearSelection = () => {
+  tableRef.value?.clearSelection()
+  selectedItems.value = []
 }
 
 // 处理单个删除
@@ -452,6 +495,33 @@ const handleFetchMissing = async () => {
   }
 }
 
+// 切换单行描述的展开/收起状态
+const toggleDescription = (title: string) => {
+  if (expandedDescriptions.value.has(title)) {
+    expandedDescriptions.value.delete(title)
+  } else {
+    expandedDescriptions.value.add(title)
+  }
+}
+
+// 检查描述是否展开
+const isDescriptionExpanded = (title: string) => {
+  return expandedDescriptions.value.has(title)
+}
+
+// 切换所有描述的展开/收起状态
+const toggleAllDescriptions = () => {
+  if (allExpanded.value) {
+    // 全部收起
+    expandedDescriptions.value.clear()
+  } else {
+    // 全部展开
+    cacheItems.value.forEach(item => {
+      expandedDescriptions.value.add(item.title)
+    })
+  }
+}
+
 // 初始化
 onMounted(async () => {
   // 设置默认日期范围为今天
@@ -527,6 +597,22 @@ onMounted(async () => {
   width: 100%;
 }
 
+/* 表头样式 */
+.hot-search-table :deep(.el-table__header-wrapper) {
+  th {
+    background: #a1edfecc;
+    color: #606660;
+    font-weight: 600;
+    font-size: 14px;
+    padding: 16px 12px !important;
+  }
+}
+
+/* 序号列居中 */
+.hot-search-table :deep(.index-column) {
+  text-align: center;
+}
+
 .hot-search-table :deep(.el-table__row) {
   height: auto !important;
 }
@@ -557,11 +643,33 @@ onMounted(async () => {
   margin-bottom: 16px;
 }
 
+.description-cell-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
 .description-cell {
   color: #606266;
   line-height: 1.8;
   word-break: break-word;
   white-space: pre-wrap;
+}
+
+.toggle-btn {
+  padding: 0;
+  height: auto;
+  font-size: 13px;
+}
+
+/* 简洁模式：只显示1行 */
+.description-compact {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .pagination-section {

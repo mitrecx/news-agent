@@ -24,33 +24,37 @@ class WeiboHotSearchCache:
         self.pool = pool
         self._own_connection = None
 
-    async def _get_connection(self):
-        """获取数据库连接（如果是池则返回acquire上下文）"""
+    def _get_connection(self):
+        """获取数据库连接（返回异步上下文管理器）"""
         if self.pool:
-            # 返回 acquire 上下文管理器
+            # pool.acquire() 已经是异步上下文管理器，直接返回
             return self.pool.acquire()
         else:
-            # 如果没有连接池，创建新的连接
-            if self._own_connection is None:
-                from ..agent.config import get_settings
-                settings = get_settings()
-                import asyncpg
-                self._own_connection = await asyncpg.connect(
-                    host=settings.db_host,
-                    port=settings.db_port,
-                    user=settings.db_user,
-                    password=settings.db_password,
-                    database=settings.db_name
-                )
-            # 对于直接连接，返回一个模拟上下文管理器
-            class _ConnectionContextManager:
-                def __init__(self, conn):
-                    self.conn = conn
+            # 对于直接连接，返回一个懒加载的上下文管理器
+            class _LazyConnectionContextManager:
+                def __init__(self, cache_instance):
+                    self.cache_instance = cache_instance
+                    self.conn = None
+
                 async def __aenter__(self):
+                    if self.cache_instance._own_connection is None:
+                        from ..agent.config import get_settings
+                        settings = get_settings()
+                        import asyncpg
+                        self.cache_instance._own_connection = await asyncpg.connect(
+                            host=settings.db_host,
+                            port=settings.db_port,
+                            user=settings.db_user,
+                            password=settings.db_password,
+                            database=settings.db_name
+                        )
+                    self.conn = self.cache_instance._own_connection
                     return self.conn
+
                 async def __aexit__(self, *args):
                     pass
-            return _ConnectionContextManager(self._own_connection)
+
+            return _LazyConnectionContextManager(self)
 
     async def close(self):
         """关闭拥有的连接"""
@@ -81,7 +85,7 @@ class WeiboHotSearchCache:
         Returns:
             URL字符串，如果不存在返回None
         """
-        async with await self._get_connection() as conn:
+        async with self._get_connection() as conn:
             title_hash = self.hash_title(title)
             url = await conn.fetchval(
                 "SELECT url FROM weibo_hot_search_cache WHERE title_hash = $1",
@@ -99,7 +103,7 @@ class WeiboHotSearchCache:
         Returns:
             缓存数据字典，如果不存在或已过期返回 None
         """
-        async with await self._get_connection() as conn:
+        async with self._get_connection() as conn:
             title_hash = self.hash_title(title)
 
             query = """
@@ -140,7 +144,7 @@ class WeiboHotSearchCache:
             description: 描述内容
             description_source: 描述来源（weibo_detail/llm/fallback）
         """
-        async with await self._get_connection() as conn:
+        async with self._get_connection() as conn:
             title_hash = self.hash_title(title)
             now = datetime.now()
             expires_at = now + self.CACHE_TTL
@@ -177,7 +181,7 @@ class WeiboHotSearchCache:
         Returns:
             标题 -> 缓存数据的字典
         """
-        async with await self._get_connection() as conn:
+        async with self._get_connection() as conn:
             title_hashes = [self.hash_title(title) for title in titles]
 
             query = """
@@ -212,7 +216,7 @@ class WeiboHotSearchCache:
         Args:
             items: HotSearchItem 对象列表
         """
-        async with await self._get_connection() as conn:
+        async with self._get_connection() as conn:
             now = datetime.now()
             expires_at = now + self.CACHE_TTL
 
@@ -254,7 +258,7 @@ class WeiboHotSearchCache:
         Returns:
             删除的行数
         """
-        async with await self._get_connection() as conn:
+        async with self._get_connection() as conn:
             result = await conn.execute(
                 "DELETE FROM weibo_hot_search_cache WHERE expires_at < NOW()"
             )
@@ -274,7 +278,7 @@ class WeiboHotSearchCache:
         Returns:
             True 如果删除成功，False 如果记录不存在
         """
-        async with await self._get_connection() as conn:
+        async with self._get_connection() as conn:
             title_hash = self.hash_title(title)
             result = await conn.execute(
                 "DELETE FROM weibo_hot_search_cache WHERE title_hash = $1",
@@ -303,7 +307,7 @@ class WeiboHotSearchCache:
         if not titles:
             return 0
 
-        async with await self._get_connection() as conn:
+        async with self._get_connection() as conn:
             title_hashes = [self.hash_title(title) for title in titles]
             result = await conn.execute(
                 "DELETE FROM weibo_hot_search_cache WHERE title_hash = ANY($1::varchar(64)[])",
@@ -322,7 +326,7 @@ class WeiboHotSearchCache:
         Returns:
             包含缓存统计的字典
         """
-        async with await self._get_connection() as conn:
+        async with self._get_connection() as conn:
             stats = await conn.fetchrow("""
                 SELECT
                     COUNT(*) as total_entries,
@@ -347,7 +351,7 @@ class WeiboHotSearchCache:
         Returns:
             True 如果已存在，False 否则
         """
-        async with await self._get_connection() as conn:
+        async with self._get_connection() as conn:
             title_hash = self.hash_title(title)
             result = await conn.fetchval(
                 "SELECT EXISTS(SELECT 1 FROM weibo_hot_search_cache WHERE title_hash = $1)",
@@ -368,7 +372,7 @@ class WeiboHotSearchCache:
         if not titles:
             return set()
 
-        async with await self._get_connection() as conn:
+        async with self._get_connection() as conn:
             title_hashes = [self.hash_title(title) for title in titles]
             rows = await conn.fetch(
                 "SELECT title FROM weibo_hot_search_cache WHERE title_hash = ANY($1::varchar(64)[])",
@@ -387,7 +391,7 @@ class WeiboHotSearchCache:
         Returns:
             True 如果插入成功，False 如果记录已存在
         """
-        async with await self._get_connection() as conn:
+        async with self._get_connection() as conn:
             title_hash = self.hash_title(title)
             now = datetime.now()
             expires_at = now + self.CACHE_TTL

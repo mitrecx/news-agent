@@ -6,7 +6,7 @@ const router = createRouter({
   routes: [
     {
       path: '/',
-      component: () => import('@/views/HomeView.vue'),
+      component: () => import('@/views/HotSearchView.vue'),
       meta: { requiresAuth: true },
     },
     {
@@ -21,8 +21,7 @@ const router = createRouter({
     },
     {
       path: '/hot-search',
-      component: () => import('@/views/HotSearchView.vue'),
-      meta: { requiresAuth: true },
+      redirect: '/',
     },
     {
       path: '/weibo-login',

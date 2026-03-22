@@ -50,9 +50,9 @@ celery_app.conf.beat_schedule = {
         'task': 'src.tasks.cache_tasks.clean_expired_cache',
         'schedule': crontab(minute='*/10'),  # 每10分钟
     },
-    # 每小时抓取微博热搜标题
+    # 每3小时抓取微博热搜标题（从0点开始：0:00, 3:00, 6:00, 9:00, 12:00, 15:00, 18:00, 21:00）
     'fetch-weibo-hot-search-titles': {
         'task': 'src.tasks.weibo_tasks.fetch_and_save_hot_search_titles',
-        'schedule': crontab(minute=0),  # 每小时整点执行
+        'schedule': crontab(hour='*/3', minute=0),  # 每3小时整点执行
     },
 }

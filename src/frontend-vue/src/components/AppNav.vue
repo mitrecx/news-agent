@@ -5,11 +5,11 @@
       <div class="nav-tabs">
         <div
           class="nav-tab"
-          :class="{ 'nav-tab--active': activeRoute === '/' }"
+          :class="{ 'nav-tab--active': activeRoute === '/' || activeRoute === '/hot-search' }"
           @click="navigateTo('/')"
         >
-          <el-icon><HomeFilled /></el-icon>
-          首页
+          <el-icon><TrendCharts /></el-icon>
+          热搜查询
         </div>
         <div
           class="nav-tab"
@@ -18,14 +18,6 @@
         >
           <el-icon><ChatDotRound /></el-icon>
           智能对话
-        </div>
-        <div
-          class="nav-tab"
-          :class="{ 'nav-tab--active': activeRoute === '/hot-search' }"
-          @click="navigateTo('/hot-search')"
-        >
-          <el-icon><TrendCharts /></el-icon>
-          热搜查询
         </div>
         <div
           class="nav-tab"
@@ -46,19 +38,7 @@
         </div>
         <template #dropdown>
           <el-dropdown-menu>
-            <el-dropdown-item command="/chat">
-              <el-icon><ChatDotRound /></el-icon>
-              智能对话
-            </el-dropdown-item>
-            <el-dropdown-item command="/hot-search">
-              <el-icon><TrendCharts /></el-icon>
-              热搜查询
-            </el-dropdown-item>
-            <el-dropdown-item command="/weibo-login">
-              <el-icon><Key /></el-icon>
-              微博登录
-            </el-dropdown-item>
-            <el-dropdown-item command="logout" divided>
+            <el-dropdown-item command="logout">
               <el-icon><SwitchButton /></el-icon>
               退出登录
             </el-dropdown-item>
@@ -73,7 +53,7 @@
 import { computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElIcon, ElDropdown, ElDropdownMenu, ElDropdownItem } from 'element-plus'
-import { ArrowDown, SwitchButton, ChatDotRound, TrendCharts, HomeFilled, Key } from '@element-plus/icons-vue'
+import { ArrowDown, SwitchButton } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 
 interface Props {
@@ -100,8 +80,6 @@ const handleCommand = (command: string) => {
   if (command === 'logout') {
     authStore.logout()
     router.push('/login')
-  } else {
-    router.push(command)
   }
 }
 </script>
