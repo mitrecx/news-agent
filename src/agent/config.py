@@ -2,6 +2,8 @@
 
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+from pathlib import Path
+from dotenv import dotenv_values
 
 
 class Settings(BaseSettings):
@@ -53,6 +55,16 @@ class Settings(BaseSettings):
 
 
 @lru_cache()
-def get_settings() -> Settings:
+def _cached_settings() -> Settings:
     """Get cached settings instance"""
     return Settings()
+
+
+def get_settings() -> Settings:
+    settings = _cached_settings()
+    # Cookie 可通过页面修改；后台进程也需在下一次任务读取新值。
+    env_file = Path(".env")
+    cookie = dotenv_values(env_file).get("WEIBO_COOKIE") if env_file.is_file() else None
+    if cookie is not None and cookie != settings.weibo_cookie:
+        return settings.model_copy(update={"weibo_cookie": cookie})
+    return settings

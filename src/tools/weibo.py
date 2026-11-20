@@ -934,4 +934,13 @@ def get_scraper(use_selenium: bool | None = None) -> WeiboScraper:
             cookie = None
 
         _scraper = WeiboScraper(use_selenium=use_selenium, cookie=cookie)
+    else:
+        from ..agent.config import get_settings
+        cookie = get_settings().weibo_cookie
+        if _scraper.cookie != cookie:
+            _scraper.cookie = cookie
+            if cookie:
+                _scraper.headers["Cookie"] = cookie
+            else:
+                _scraper.headers.pop("Cookie", None)
     return _scraper
