@@ -1,177 +1,133 @@
 # News Agent
 
-基于 LangChain 和 DeepSeek 的新闻助手 Agent，支持查询微博热搜。
+微博热搜与 AI 阅读工作台，提供热点采集、摘要阅读、智能对话和页面配置。
 
-## 功能
+## 页面与功能
 
-- 基于 LangChain 框架的智能对话
-- 使用 DeepSeek 模型进行对话
-- 流式输出响应
-- 微博热搜查询功能（Agent 自动判断何时调用）
-- 支持 Selenium 爬虫绕过反爬
-- 自动降级策略（Selenium → HTTP → 模拟数据）
-- **用户认证系统** - 需要登录才能使用
-- Web 界面访问
+- **热点资讯**：左侧资讯列表、右侧阅读详情；支持搜索、日期筛选、分页、批量选择、原文链接和删除。顶部「批量生成摘要」按数量处理待生成资讯，详情中的「获取本条详情」只抓取当前选中话题并生成摘要，保留当前页码和选择。
+- **智能对话**：对话历史、Markdown 回复、请求中断，以及从资讯页带入话题。
+- **设置 → 模型配置**：每个用户可添加多个模型连接，独立配置显示名称、API 地址、API Key、模型 ID 和生成参数；支持获取模型列表、连接测试、编辑、删除和切换启用。
+- **设置 → 微博连接**：保存微博 Cookie 后立即对后续采集生效，无需重启。
 
-## 用户认证
+个人模型配置保存在 PostgreSQL 的 `user_model_profiles` 表，每个用户最多启用一个模型。API Key 经加密存储，接口只返回是否已设置，不回显密钥。编辑时留空 API Key 可保留该模型的密钥；新增模型需填写自己的密钥，修改 API 地址时必须重新填写对应密钥。
 
-系统需要用户登录才能使用。
+运行时仅使用该用户已启用的模型，作用于聊天、对话标题生成和手动摘要；未配置时提示先添加模型。手动采集派生的后台摘要任务绑定发起用户，在任务执行时读取该用户的启用模型。定时采集只保存标题，不使用任何系统模型生成摘要。资讯库与微博 Cookie 当前由工作台共享，模型配置按用户隔离。
 
-- 使用用户名和密码登录
-- 默认测试账号：用户名 `test`，密码 `test123456`
-- 登录后可以与 Agent 对话，查询微博热搜等
+## 本地启动
 
-### 数据库配置
-
-首次启动前需要初始化数据库：
+需要 Python 3.12+、Node.js（满足 Vite 8 的运行要求）、uv、PostgreSQL；定时任务还需要 Redis，浏览器采集需要 Chrome。
 
 ```bash
-# 运行数据库初始化脚本
+uv sync --frozen
+cp .env.example .env
+```
+
+在 `.env` 中设置数据库连接和独立的 `JWT_SECRET`。模型通过页面配置；`.env` 中的模型字段只用于下述一次性导入，不作为运行时默认配置。
+
+数据库需提前创建，然后执行：
+
+```bash
 uv run python scripts/init_db.py
+uv run python scripts/migrate_weibo_cache.py
+uv run python scripts/migrate_model_settings.py
 ```
 
-这会创建 `news_agent` 数据库和测试用户。
+初始化会创建本地测试账号 `test`，密码 `test123456`。
 
-## 如何启动
-
-### 前置要求
-
-1. **Python 3.10+**
-   - 检查版本: `python --version`
-
-2. **uv 包管理器** (推荐)
-   - 安装: `curl -LsSf https://astral.sh/uv/install.sh | sh`
-   - 或 macOS: `brew install uv`
-
-3. **Chrome 浏览器** (Selenium 爬虫需要)
-   - **macOS**: `brew install --cask google-chrome`
-   - **Ubuntu**: `sudo apt-get install google-chrome-stable`
-   - **Windows**: 从 https://www.google.com/chrome/ 下载
-
-### 安装步骤
-
-1. **克隆项目**
-   ```bash
-   git clone https://github.com/mitrecx/news-agent.git
-   cd news-agent
-   ```
-
-2. **安装依赖**
-   ```bash
-   uv sync
-   ```
-
-3. **配置环境变量**
-   ```bash
-   # 复制环境变量模板
-   cp .env.example .env
-
-   # 编辑 .env 文件，填入你的 DeepSeek API Key
-   # DEEPSEEK_API_KEY=your_actual_api_key_here
-   ```
-
-### 启动服务
+启动后端：
 
 ```bash
-uv run python run.py
+uv run uvicorn src.api.server:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-启动成功后会看到类似输出：
+另开终端启动前端：
+
+```bash
+cd src/frontend-vue
+npm ci
+npm run dev -- --host 127.0.0.1 --port 6173
 ```
-✓ News Agent initialized with model: deepseek-chat
-✓ Loaded 1 tool(s): ['fetch_weibo_hot_search']
-INFO:     Uvicorn running on http://0.0.0.0:8000
+
+访问 `http://localhost:6173`，API 文档为 `http://localhost:8000/docs`。
+
+> `scripts/start_backend.sh` 是旧的远程数据库隧道启动器；使用本机 PostgreSQL 时请使用上面的命令。
+
+## 页面配置模型
+
+1. 登录后进入「设置 → 模型配置」，点击「添加模型」。
+2. 填写显示名称、API 根地址（如 `https://api.deepseek.com/v1`）、API Key 和服务商提供的模型 ID。
+3. 可通过「获取模型列表」选择模型；不支持模型列表的服务也可手动输入。
+4. 点击「测试连接」检查实际调用，再点击「添加模型」。测试不会保存或切换配置。
+5. 第一个模型自动启用，后续添加的模型作为备用；点击模型卡片上的「启用」切换。
+6. 后续聊天和手动摘要使用已启用的模型，已经开始的请求继续使用原配置。删除当前模型前需先切换到另一个；删除最后一个模型后需重新添加才能使用 AI。
+
+配置支持 Chat Completions 兼容接口。API 地址需为根地址，不包含 `/chat/completions`、查询参数或 URL 中的用户名密码。
+
+已有 `.env` 模型可以显式导入指定账号：
+
+```bash
+uv run python scripts/import_model_from_env.py --username test --name "我的第一个模型"
 ```
 
-### 访问应用
+导入只在该账号没有模型时执行，保存为普通的个人模型并自动启用，不输出连接地址或密钥。旧 `user_model_settings` 数据会在迁移或启动时转换为一个个人模型；删除后不会重新导入。
 
-- **Web 界面**: http://localhost:8000
-- **API 文档**: http://localhost:8000/docs
-- **健康检查**: http://localhost:8000/health
+修改 `JWT_SECRET` 会使现有登录令牌失效，并使原有模型密钥无法解密，需要重新填写；请保持该值稳定并与数据库备份一同保管。
 
-### 测试微博热搜
+## 微博连接
 
-在 Web 界面中输入以下任一问题：
-- "今天有什么热搜？"
-- "微博上最近有什么热门话题？"
-- "看看现在的热搜榜"
+热搜榜单与正文的访问限制不同。榜单可能可匿名访问，正文可能跳转到微博登录页。
 
-Agent 会自动识别并调用微博热搜工具获取最新数据。
+在已登录微博的浏览器中，从 Network 请求头复制 Cookie，在「设置 → 微博连接」保存。已保存的 Cookie 不回显，值也不写入应用日志。后端与任务进程在下一次操作时读取最新 Cookie。
 
+## 定时任务
+
+配置 `.env` 中的 `REDIS_HOST`、`REDIS_PORT`，启动 Redis，再运行：
+
+```bash
+uv run --env-file .env celery -A src.celery_app worker --loglevel=info
+uv run --env-file .env celery -A src.celery_app beat --loglevel=info
+```
+
+每 3 小时采集一次微博热搜标题，每 10 分钟清理过期数据。定时采集不生成 AI 摘要；用户可以在页面选择模型后生成。
+
+## 配置项
+
+| 环境变量 | 用途 |
+| --- | --- |
+| `DB_HOST`、`DB_PORT`、`DB_USER`、`DB_PASSWORD`、`DB_NAME` | PostgreSQL 连接 |
+| `JWT_SECRET` | 登录签名及个人模型密钥加密，需保持稳定 |
+| `DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL` | 仅供一次性导入的模型连接（运行时不读取） |
+| `AGENT_MODEL`、`AGENT_TEMPERATURE`、`AGENT_MAX_TOKENS` | 仅供一次性导入的模型 ID 及生成参数 |
+| `WEIBO_COOKIE` | 工作台共享的微博采集凭据，支持页面更新 |
+| `REDIS_HOST`、`REDIS_PORT` | Celery 消息队列与任务结果 |
+
+不要提交 `.env` 或凭据文件。
+
+## 验证
+
+```bash
+# 多模型增删改、切换、用户隔离、迁移、密钥保护、模型调用和 Cookie 即时生效
+uv run python -m unittest tests.test_model_settings -v
+
+# 单条详情只处理指定资讯，验证批量行为、重试、失败及认证边界
+uv run python -m unittest tests.test_hotsearch_summary -v
+
+# 前端类型检查与生产构建
+cd src/frontend-vue
+npm run build
+```
+
+模型配置集成测试需要可连接的 PostgreSQL：测试只创建、清理独立 schema，不使用或修改现有用户数据。模型调用测试使用临时本地 HTTP 服务，无需真实模型额度。
 
 ## 项目结构
 
+```text
+src/
+  frontend-vue/  Vue 3、Pinia、Element Plus 工作台
+  api/           FastAPI 聊天、热搜及微博连接 API
+  settings/      个人模型配置、加密存储和连接测试
+  auth/          登录、用户及会话持久化
+  agent/         模型客户端与工具调用
+  tools/         微博采集、缓存和摘要
+  tasks/         Celery 定时采集及摘要任务
 ```
-news-agent/
-├── src/
-│   ├── agent/           # Agent 核心逻辑
-│   │   ├── base.py      # Agent 实现（支持工具绑定）
-│   │   └── config.py    # 配置管理
-│   ├── api/             # API 服务
-│   │   ├── server.py    # FastAPI 服务器
-│   │   └── models.py    # 请求/响应模型
-│   ├── auth/            # 认证模块
-│   │   ├── router.py    # 认证路由
-│   │   ├── models.py    # 用户模型
-│   │   ├── security.py  # 安全工具（密码哈希、JWT）
-│   │   ├── database.py  # 数据库连接
-│   │   └── user_service.py # 用户服务
-│   ├── tools/           # LangChain 工具集成
-│   │   ├── __init__.py  # 工具导出
-│   │   └── weibo.py     # 微博热搜爬虫
-│   └── frontend/        # 前端页面
-│       └── index.html
-├── scripts/             # 脚本目录
-│   └── init_db.py       # 数据库初始化脚本
-├── .env.example         # 环境变量示例
-├── pyproject.toml       # 项目配置
-└── run.py              # 启动脚本
-```
-
-## 配置说明
-
-| 环境变量 | 说明 | 默认值 |
-|---------|------|--------|
-| `DEEPSEEK_API_KEY` | DeepSeek API 密钥 | 必填 |
-| `DEEPSEEK_BASE_URL` | DeepSeek API 地址 | `https://api.deepseek.com/v1` |
-| `HOST` | 服务监听地址 | `0.0.0.0` |
-| `PORT` | 服务端口 | `8000` |
-| `AGENT_MODEL` | 使用的模型 | `deepseek-chat` |
-| `AGENT_TEMPERATURE` | 模型温度参数 | `0.7` |
-| `AGENT_MAX_TOKENS` | 最大 token 数 | `2000` |
-| `WEIBO_SCRAPER_TIMEOUT` | 微博爬虫超时时间（秒） | `10` |
-| `WEIBO_USE_SELENIUM` | 是否使用 Selenium 爬虫 | `true` |
-| `DB_HOST` | 数据库主机 | `localhost` |
-| `DB_PORT` | 数据库端口 | `5432` |
-| `DB_USER` | 数据库用户名 | `your_username` |
-| `DB_PASSWORD` | 数据库密码 | `your_password` |
-| `DB_NAME` | 数据库名称 | `news_agent` |
-| `JWT_SECRET` | JWT 密钥 | `your-secret-key-change-this` |
-
-## 技术实现
-
-### 微博热搜爬虫
-
-支持两种爬虫方式，自动降级：
-
-1. **Selenium 爬虫（推荐）** - 使用真实浏览器，能处理复杂反爬
-   - 自动下载 ChromeDriver
-   - 无头模式运行
-   - 能绕过大部分反爬机制
-
-2. **HTTP 爬虫** - 使用 `httpx` + `BeautifulSoup`
-   - 轻量级，速度快
-   - 可能被反爬拦截
-
-
-### LangChain 工具集成
-
-微博热搜功能作为 LangChain Tool 集成：
-
-```python
-@tool
-async def fetch_weibo_hot_search(limit: int = 10) -> str:
-    """获取微博热搜榜..."""
-```
-
-Agent 会自动判断用户意图，当用户询问热搜相关问题时自动调用该工具。

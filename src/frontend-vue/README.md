@@ -1,240 +1,30 @@
-# News Agent - Vue.js Frontend
+# News Agent 前端
 
-Modern Vue.js 3 + Vite + Element Plus frontend for the News Agent application.
+Vue 3 + TypeScript + Pinia + Element Plus。
 
-## 🎯 Features
-
-- ✅ **User Authentication** - JWT-based login system
-- ✅ **Real-time Chat** - SSE streaming responses
-- ✅ **Modern UI** - Element Plus component library
-- ✅ **Responsive Design** - Mobile-friendly interface
-- ✅ **TypeScript** - Full type safety
-- ✅ **State Management** - Pinia with persistence
-- ✅ **Gradient Theme** - Beautiful purple gradient design
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Node.js 18+ and npm
-- Backend server running on `http://localhost:8000`
-
-### Installation
+## 启动
 
 ```bash
-cd src/frontend-vue
-npm install
+npm ci
+npm run dev -- --host 127.0.0.1 --port 6173
 ```
 
-### Development
+开发服务器代理 `/api` 和 `/health` 到 `http://localhost:8000`。
 
-```bash
-# Start frontend (port 5173)
-npm run dev
+## 页面
 
-# Start backend (port 8000)
-cd ../..
-uv run python run.py
-```
+- `/`：热点列表、筛选、摘要阅读和采集。操作栏批量生成摘要；详情区只获取当前选中话题并生成摘要，完成后保留页码与选中项。
+- `/chat`：用户会话、Markdown 回复、停止生成。
+- `/settings`：个人多模型管理、获取模型列表、连接测试、编辑删除和启用切换。
+- `/settings?tab=weibo`：共享微博连接。旧 `/weibo-login` 路径自动重定向。
+- `/login`：登录工作台。
 
-### Access
+所有业务页面共用 AppShell 的侧栏和工作区；窄屏使用图标导航，对话历史可展开。模型密钥只在编辑表单中短暂存在，保存后清空，不写入 localStorage。
 
-- Frontend: http://localhost:5173
-- Backend: http://localhost:8000
-- API Docs: http://localhost:8000/docs
-
-### Login
-
-Use the test credentials:
-- Username: `test`
-- Password: `test123456`
-
-## 📁 Project Structure
-
-```
-src/frontend-vue/
-├── src/
-│   ├── api/              # API client modules
-│   │   ├── auth.ts       # Authentication API
-│   │   └── chat.ts       # Chat API with SSE
-│   ├── components/       # Vue components
-│   │   ├── ChatInput.vue     # Message input component
-│   │   └── ChatMessage.vue   # Message bubble component
-│   ├── composables/      # Vue composables
-│   │   ├── useChatStream.ts  # SSE streaming logic
-│   │   └── useHealthCheck.ts # Health check polling
-│   ├── router/           # Vue Router
-│   │   └── index.ts      # Route definitions
-│   ├── stores/           # Pinia stores
-│   │   ├── auth.ts       # Authentication state
-│   │   └── chat.ts       # Chat state
-│   ├── types/            # TypeScript types
-│   │   └── index.ts      # Type definitions
-│   ├── utils/            # Utility functions
-│   │   └── request.ts    # Axios instance with interceptors
-│   ├── views/            # Page components
-│   │   ├── LoginView.vue # Login page
-│   │   └── ChatView.vue  # Chat page
-│   ├── App.vue           # Root component
-│   ├── main.ts           # Entry point
-│   └── style.css         # Global styles
-├── vite.config.ts        # Vite configuration
-├── tsconfig.json         # TypeScript config
-└── package.json          # Dependencies
-```
-
-## 🛠️ Tech Stack
-
-- **Framework**: Vue 3 with Composition API
-- **Build Tool**: Vite
-- **UI Library**: Element Plus
-- **State Management**: Pinia
-- **Routing**: Vue Router
-- **HTTP Client**: Axios
-- **SSE**: @microsoft/fetch-event-source
-- **Markdown**: markdown-it
-- **Language**: TypeScript
-
-## 🎨 Key Features
-
-### Authentication
-
-- JWT token stored in localStorage
-- Automatic token injection via Axios interceptors
-- Protected routes with navigation guards
-- Token refresh and error handling
-
-### Chat Interface
-
-- Real-time streaming responses via SSE
-- Message history management
-- Auto-scroll to latest message
-- Markdown rendering for AI responses
-- Syntax highlighting for code blocks
-
-### UI/UX
-
-- Gradient purple theme matching original design
-- Responsive layout for mobile and desktop
-- Smooth animations and transitions
-- Loading states and error handling
-- Health status indicator
-
-## 📦 Build for Production
+热点资讯在桌面端按窗口高度分配阅读空间，资讯列表和正文独立滚动，分页与详情栏保持可见；窄屏改为上下排列，各阅读区域仍可滚动。
 
 ```bash
 npm run build
 ```
 
-The build output will be in `dist/`.
-
-### Serve Static Files
-
-You can serve the built frontend with the FastAPI backend:
-
-```bash
-# Build the frontend
-npm run build
-
-# Copy to backend static directory
-cp -r dist/* ../frontend/
-
-# Or serve via nginx
-```
-
-## 🔧 Configuration
-
-### Vite Config
-
-[vite.config.ts](vite.config.ts)
-- API proxy to `http://localhost:8000`
-- Path alias `@/` for `src/`
-- Dev server on port 5173
-
-### Environment Variables
-
-No environment variables needed for development. The API proxy handles all backend communication.
-
-## 🧪 Testing
-
-```bash
-# Test authentication
-curl -X POST http://localhost:8000/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"username": "test", "password": "test123456"}'
-
-# Test health endpoint
-curl http://localhost:8000/health
-
-# Test SSE streaming
-curl -N http://localhost:8000/api/chat/stream \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"message": "你好"}'
-```
-
-## 📝 API Endpoints
-
-### Authentication
-
-- `POST /api/auth/login` - User login
-- `POST /api/auth/register` - User registration
-- `GET /api/auth/me` - Get current user
-
-### Chat
-
-- `POST /api/chat/stream` - Send message with streaming response
-
-### Health
-
-- `GET /health` - Check server and agent status
-
-## 🐛 Troubleshooting
-
-### CORS Issues
-
-If you encounter CORS errors, ensure the backend has CORS configured for `http://localhost:5173`.
-
-### Port Conflicts
-
-If port 5173 is in use, modify `vite.config.ts`:
-
-```typescript
-server: {
-  port: 3000,  // Change to available port
-  // ...
-}
-```
-
-### Module Resolution
-
-If you see import errors, ensure `@/` alias is configured in both:
-- `vite.config.ts` - Vite resolution
-- `tsconfig.app.json` - TypeScript resolution
-
-## 🚀 Deployment
-
-### Development
-
-1. Start backend: `uv run python run.py`
-2. Start frontend: `npm run dev`
-3. Open: http://localhost:5173
-
-### Production
-
-1. Build: `npm run build`
-2. Deploy `dist/` to static file server (Nginx, S3, etc.)
-3. Configure backend CORS for production domain
-4. Update API base URL if needed
-
-## 📄 License
-
-Same as parent project.
-
-## 🤝 Contributing
-
-1. Follow Vue 3 Composition API patterns
-2. Use TypeScript for type safety
-3. Test on mobile devices
-4. Maintain gradient theme consistency
-
+运行方式、数据库迁移及配置作用范围请参阅项目根目录 README。

@@ -4,44 +4,28 @@ import { useAuthStore } from '@/stores/auth'
 const router = createRouter({
   history: createWebHistory(),
   routes: [
+    { path: '/login', component: () => import('@/views/LoginView.vue') },
     {
       path: '/',
-      component: () => import('@/views/HotSearchView.vue'),
+      component: () => import('@/components/AppShell.vue'),
       meta: { requiresAuth: true },
+      children: [
+        { path: '', component: () => import('@/views/HotSearchView.vue') },
+        { path: 'chat', component: () => import('@/views/ChatView.vue') },
+        {
+          path: 'settings',
+          component: () => import('@/views/SettingsView.vue'),
+        },
+      ],
     },
-    {
-      path: '/chat',
-      component: () => import('@/views/ChatView.vue'),
-      meta: { requiresAuth: true },
-    },
-    {
-      path: '/login',
-      component: () => import('@/views/LoginView.vue'),
-      meta: { requiresAuth: false },
-    },
-    {
-      path: '/hot-search',
-      redirect: '/',
-    },
-    {
-      path: '/weibo-login',
-      component: () => import('@/views/WeiboLoginView.vue'),
-      meta: { requiresAuth: true },
-    },
+    { path: '/hot-search', redirect: '/' },
+    { path: '/weibo-login', redirect: '/settings?tab=weibo' },
+    { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
 })
-
-// Navigation guard for authentication
-router.beforeEach((to, _from, next) => {
-  const authStore = useAuthStore()
-
-  if (to.meta.requiresAuth && !authStore.isAuthenticated) {
-    next('/login')
-  } else if (to.path === '/login' && authStore.isAuthenticated) {
-    next('/')
-  } else {
-    next()
-  }
+router.beforeEach((to) => {
+  const auth = useAuthStore()
+  if (to.meta.requiresAuth && !auth.isAuthenticated) return '/login'
+  if (to.path === '/login' && auth.isAuthenticated) return '/'
 })
-
 export default router

@@ -10,7 +10,7 @@ import os
 import json
 import logging
 
-from .models import ChatRequest, ChatResponse, HealthResponse
+from .models import ChatRequest, ChatResponse, HealthResponse, SingleSummaryResponse
 from ..agent.base import NewsAgent
 from ..agent.config import get_settings
 from ..tools import fetch_weibo_hot_search
@@ -492,6 +492,46 @@ async def get_has_description_items(
                 for row in items
             ]
         }
+
+
+@app.post("/api/weibo/cache/{title_hash}/summary", response_model=SingleSummaryResponse)
+async def fetch_story_summary(title_hash: str, current_user: User = Depends(get_current_user)):
+    """只抓取指定资讯的链接，并使用发起用户启用的模型生成摘要。"""
+    from ..tasks.weibo_tasks import _fetch_and_update_description_async
+
+    if db.pool is None:
+        raise HTTPException(503, detail="服务正在初始化")
+
+    query = """SELECT title_hash, title, url, description, description_source,
+        created_at, updated_at, expires_at FROM weibo_hot_search_cache
+        WHERE title_hash=$1 AND expires_at > NOW()"""
+    async with db.pool.acquire() as conn:
+        item = await conn.fetchrow(query, title_hash)
+        if item is None:
+            raise HTTPException(404, detail="这条资讯不存在或已过期，请刷新列表")
+        if item["description"]:
+            return {"status": "cached", "item": dict(item)}
+        if not item["url"]:
+            raise HTTPException(400, detail="这条资讯缺少微博链接，请重新采集热搜后重试")
+        model_config = await resolve_user_model(conn, current_user.id)
+
+    try:
+        result = await _fetch_and_update_description_async(
+            item["title"], item["url"], 1, model_config=model_config, pool=db.pool
+        )
+    except Exception as error:
+        logger.warning("单条资讯获取失败 (%s)", type(error).__name__)
+        raise HTTPException(502, detail="本条资讯获取失败，请检查微博 Cookie 和模型连接后重试") from None
+    if not result.get("success"):
+        raise HTTPException(502, detail="本条资讯获取失败，请检查微博 Cookie 和模型连接后重试")
+
+    async with db.pool.acquire() as conn:
+        updated = await conn.fetchrow(query, title_hash)
+    if updated is None:
+        raise HTTPException(404, detail="这条资讯已被移除，请刷新列表")
+    if not updated["description"]:
+        raise HTTPException(502, detail="本条资讯暂未生成摘要，请稍后重试")
+    return {"status": "generated", "item": dict(updated)}
 
 
 @app.post("/api/weibo/cache/fetch-missing")
