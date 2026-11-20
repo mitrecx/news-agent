@@ -19,6 +19,8 @@ from ..auth.models import User, Conversation, ConversationUpdate
 from ..auth.conversation_service import ConversationService
 from ..tools.weibo_cache import WeiboHotSearchCache
 from . import weibo_login
+from ..settings.router import router as settings_router
+from ..settings.service import ModelSettingsService
 
 # 配置日志
 logging.basicConfig(
@@ -26,33 +28,22 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
-
-# Global agent instance
-agent: NewsAgent | None = None
-
+# 上游 API 地址属于连接配置，不记录到常规请求日志。
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager"""
     # Initialize database
-    settings = get_settings()
     try:
         await db.connect()
+        async with db.pool.acquire() as conn:
+            await ModelSettingsService.ensure_schema(conn)
     except Exception as e:
         print(f"✗ Failed to connect to database: {e}")
         raise
 
-    # Initialize agent
-    global agent
-    try:
-        # Initialize agent with tools
-        tools = [fetch_weibo_hot_search]
-        agent = NewsAgent(tools=tools)
-        print(f"✓ News Agent initialized with model: {settings.agent_model}")
-        print(f"✓ Loaded {len(tools)} tool(s): {[t.name for t in tools]}")
-    except Exception as e:
-        print(f"✗ Failed to initialize agent: {e}")
-        raise
+    print("✓ User model profiles ready")
 
     yield
 
@@ -72,6 +63,14 @@ app = FastAPI(
 app.include_router(auth_router)
 # Include weibo login router
 app.include_router(weibo_login.router)
+app.include_router(settings_router)
+
+
+async def resolve_user_model(conn, user_id):
+    try:
+        return await ModelSettingsService.resolve(conn, user_id)
+    except ValueError as error:
+        raise HTTPException(400, detail=str(error)) from None
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -79,7 +78,7 @@ async def health_check():
     """Health check endpoint"""
     return HealthResponse(
         status="ok",
-        agent_ready=agent is not None
+        agent_ready=db.pool is not None
     )
 
 
@@ -298,7 +297,7 @@ async def get_weibo_cache(
 
         # Get entries with filters
         query = f"""
-            SELECT title_hash, title, description, description_source,
+            SELECT title_hash, title, url, description, description_source,
                    created_at, updated_at, expires_at
             FROM weibo_hot_search_cache
             {where_clause}
@@ -315,6 +314,7 @@ async def get_weibo_cache(
             "items": [
                 {
                     "title_hash": row["title_hash"],
+                    "url": row["url"],
                     "title": row["title"],
                     "description": row["description"],
                     "description_source": row["description_source"],
@@ -499,209 +499,62 @@ async def fetch_missing_descriptions(
     limit: int = 10,
     current_user: User = Depends(get_current_user)
 ):
-    """
-    Manually trigger fetching descriptions for items missing descriptions
-
-    Args:
-        limit: Maximum number of items to process (default: 10)
-        current_user: Authenticated user
-
-    Returns:
-        Task results with success/failure information
-    """
-    from ..tasks.weibo_tasks import _fetch_and_update_description_async
-    import concurrent.futures
+    """使用当前用户的模型生成缺失摘要，不阻塞 API 事件循环。"""
     import asyncio
+    from ..tasks.weibo_tasks import _fetch_and_update_description_async
 
-    # 1. 获取没有描述的热搜标题和URL（从数据库）
+    if not 1 <= limit <= 50:
+        raise HTTPException(422, detail="每次生成数量应在 1 到 50 之间")
     async with db.pool.acquire() as conn:
-        missing_items = await conn.fetch("""
-            SELECT title, url
-            FROM weibo_hot_search_cache
-            WHERE (description IS NULL OR description = '')
-              AND expires_at > NOW()
-            ORDER BY created_at ASC
-            LIMIT $1
+        model_config = await resolve_user_model(conn, current_user.id)
+        if not model_config.api_key.get_secret_value():
+            raise HTTPException(400, detail="请先在设置中配置个人模型")
+        items = await conn.fetch("""
+            SELECT title, url FROM weibo_hot_search_cache
+            WHERE (description IS NULL OR description = '') AND expires_at > NOW()
+            ORDER BY created_at ASC LIMIT $1
         """, limit)
 
-    if not missing_items:
-        return {
-            "message": "没有需要处理的任务",
-            "total_queued": 0,
-            "success_count": 0,
-            "failed_count": 0,
-            "items": []
-        }
+    semaphore = asyncio.Semaphore(2)
 
-    # 2. 为每个缺失描述的热搜准备任务数据（直接使用数据库中的URL）
-    tasks_data = []
-    for idx, item in enumerate(missing_items):
-        title = item["title"]
-        url = item["url"] or ""  # 使用数据库中的URL，可能为空
-        tasks_data.append((title, url, idx + 1))
-
-    has_url_count = sum(1 for _, url, _ in tasks_data if url)
-    logger.info(f"📊 找到 {len(tasks_data)} 条热搜需要处理，其中 {has_url_count} 条有URL")
-
-    # 5. 在后台线程中执行任务
-    def run_single_task(title: str, url: str, rank: int):
-        """在后台线程中执行单个描述抓取任务"""
-        try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                result = loop.run_until_complete(
-                    _fetch_and_update_description_async(title, url, rank)
-                )
-                logger.info(f"✅ 描述任务完成: {title[:30]}..., success={result.get('success')}")
-                return result
-            finally:
-                loop.close()
-        except Exception as e:
-            logger.error(f"❌ 描述任务失败: {title}, 错误: {e}", exc_info=True)
+    async def process(item, rank):
+        async with semaphore:
+            result = await _fetch_and_update_description_async(
+                item["title"], item["url"] or "", rank, model_config=model_config, pool=db.pool
+            )
+            success = result.get("success", False)
             return {
-                'title': title,
-                'rank': rank,
-                'success': False,
-                'description': None,
-                'description_source': None,
-                'error': str(e)
+                "title": item["title"], "rank": rank,
+                "task_id": f"manual-{rank}", "status": "success" if success else "failed",
+                "description_source": result.get("description_source"),
+                "error": None if success else "未能生成摘要，请检查微博 Cookie 和模型连接",
             }
 
-    # 使用 ThreadPoolExecutor 并发执行多个任务
-    results = []
-    completed_count = 0
-    total_count = len(tasks_data)
-
-    logger.info(f"🚀 开始批量抓取描述，共 {total_count} 条热搜")
-
-    # 减少并发数到2，避免资源竞争
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        # 提交所有任务
-        future_to_title = {}
-        for title, url, rank in tasks_data:
-            future = executor.submit(
-                run_single_task,
-                title=title,
-                url=url,  # 使用从热搜列表获取的URL
-                rank=rank
-            )
-            future_to_title[future] = title
-            logger.info(f"📤 已提交任务 [{rank}/{total_count}]: {title[:30]}... (URL: {'有' if url else '无'})")
-
-        # 等待所有任务完成
-        for future in concurrent.futures.as_completed(future_to_title, timeout=600):
-            completed_count += 1
-            title = future_to_title[future]
-            try:
-                result = future.result()
-                success = result.get("success", False)
-                error = result.get("error")
-                description_source = result.get("description_source")
-
-                # 构建详细结果
-                item_result = {
-                    "title": result.get("title", title),
-                    "task_id": f"manual-{int(asyncio.get_event_loop().time())}-{len(results)}",
-                    "status": "success" if success else "failed",
-                    "error": error if not success else None,
-                    "description_source": description_source if success else None,
-                    "rank": result.get("rank")
-                }
-
-                results.append(item_result)
-
-                # 记录进度
-                if success:
-                    logger.info(f"✅ [{completed_count}/{total_count}] {title[:30]}... (来源: {description_source})")
-                else:
-                    logger.warning(f"❌ [{completed_count}/{total_count}] {title[:30]}... 失败: {error}")
-
-            except Exception as e:
-                logger.error(f"❌ 任务执行异常: {title}, 错误: {e}")
-                results.append({
-                    "title": title,
-                    "task_id": f"failed-{len(results)}",
-                    "status": "failed",
-                    "error": str(e),
-                    "description_source": None
-                })
-
-    # 统计结果
-    success_count = sum(1 for r in results if r["status"] == "success")
-    failed_count = len(results) - success_count
-
-    logger.info(f"📊 批量抓取完成: 成功 {success_count} 条，失败 {failed_count} 条")
-
+    results = await asyncio.gather(*(process(item, index+1) for index, item in enumerate(items)))
+    success_count = sum(item["status"] == "success" for item in results)
     return {
-        "message": "批量抓取完成",
-        "total_queued": len(results),
-        "success_count": success_count,
-        "failed_count": failed_count,
-        "items": results
+        "message": "批量生成完成" if results else "没有需要处理的任务",
+        "total_queued": len(results), "success_count": success_count,
+        "failed_count": len(results)-success_count, "items": results,
     }
 
 
 @app.post("/api/weibo/cache/fetch-hot-search")
-async def fetch_hot_search(
-    limit: int = 50,
-    current_user: User = Depends(get_current_user)
-):
-    """
-    Manually trigger fetching weibo hot search titles
-
-    Args:
-        limit: Maximum number of hot search items to fetch (default: 50)
-        current_user: Authenticated user
-
-    Returns:
-        Task result with statistics and detailed item status
-    """
+async def fetch_hot_search(limit: int = 50, current_user: User = Depends(get_current_user)):
+    """采集榜单；后续摘要读取发起用户启用的模型。"""
     from ..tasks.weibo_tasks import _fetch_and_save_hot_search_titles_async
-    import concurrent.futures
-    import asyncio
-
-    # 在后台线程中执行任务（避免Celery配置问题）
-    def run_in_background():
-        try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                result = loop.run_until_complete(
-                    _fetch_and_save_hot_search_titles_async(limit)
-                )
-                logger.info(f"✅ 后台抓取任务完成: total_fetched={result.get('total_fetched')}, new_items={result.get('new_items')}")
-                return result
-            finally:
-                loop.close()
-        except Exception as e:
-            logger.error(f"❌ 后台抓取任务失败: {e}", exc_info=True)
-            return {
-                'total_fetched': 0,
-                'new_items': 0,
-                'cached_items': 0,
-                'description_tasks_queued': 0,
-                'items': [],
-                'error': str(e)
-            }
-
-    # 使用 ThreadPoolExecutor 在后台线程执行任务并等待结果
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-        future = executor.submit(run_in_background)
-        result = future.result(timeout=60)  # 最多等待60秒
-
-    return {
-        "message": "抓取完成",
-        "task_id": f"manual-{int(asyncio.get_event_loop().time())}",
-        "limit": limit,
-        "status": "completed",
-        **result
-    }
+    if not 1 <= limit <= 50:
+        raise HTTPException(422, detail="每次采集数量应在 1 到 50 之间")
+    try:
+        result = await _fetch_and_save_hot_search_titles_async(limit, user_id=current_user.id)
+    except Exception:
+        raise HTTPException(502, detail="热搜采集失败，请检查网络和微博 Cookie") from None
+    return {"message": "采集完成", "limit": limit, "status": "completed", **result}
 
 
 # ========== Helper function to generate conversation title ==========
 
-async def generate_title_with_ai(first_message: str, first_response: str) -> str:
+async def generate_title_with_ai(first_message: str, first_response: str, active_agent) -> str:
     """策略1: 使用 AI 生成简洁的对话标题"""
     try:
         # Create a simple prompt for title generation
@@ -712,7 +565,8 @@ async def generate_title_with_ai(first_message: str, first_response: str) -> str
 只返回标题，不要其他内容。"""
 
         # Use the agent to generate title (non-streaming)
-        title = await agent.chat(prompt, history=None)
+        title_response = await active_agent.llm.ainvoke(prompt)
+        title = title_response.content
 
         # Clean up the title
         title = title.strip()
@@ -741,11 +595,11 @@ def generate_title_by_truncate(first_message: str, first_response: str) -> str:
     return title if title else "新对话"
 
 
-async def generate_conversation_title(first_message: str, first_response: str) -> str:
+async def generate_conversation_title(first_message: str, first_response: str, active_agent) -> str:
     """根据配置的策略生成对话标题"""
     settings = get_settings()
     if settings.title_generation_strategy == "ai":
-        return await generate_title_with_ai(first_message, first_response)
+        return await generate_title_with_ai(first_message, first_response, active_agent)
     else:  # truncate
         return generate_title_by_truncate(first_message, first_response)
 
@@ -766,9 +620,14 @@ async def chat(
     Returns:
         Chat response from the agent
     """
-    if agent is None:
-        raise HTTPException(status_code=503, detail="Agent not initialized")
+    if db.pool is None:
+        raise HTTPException(status_code=503, detail="服务正在初始化")
 
+    async with db.pool.acquire() as settings_conn:
+        model_config = await resolve_user_model(settings_conn, current_user.id)
+    if not model_config.api_key.get_secret_value():
+        raise HTTPException(400, detail="请先在设置中配置个人模型")
+    active_agent = NewsAgent(tools=[fetch_weibo_hot_search], model_config=model_config)
     conversation_id = request.conversation_id
     async with db.pool.acquire() as conn:
         # Create or get conversation
@@ -807,7 +666,7 @@ async def chat(
     print(f"{'='*60}\n")
 
     try:
-        response = await agent.chat(request.message, history)
+        response = await active_agent.chat(request.message, history)
 
         # Save assistant response
         async with db.pool.acquire() as conn:
@@ -831,7 +690,7 @@ async def chat(
                     if first_user_msg and first_assistant_msg:
                         title = await generate_conversation_title(
                             first_user_msg["content"],
-                            first_assistant_msg["content"]
+                            first_assistant_msg["content"], active_agent
                         )
                         await ConversationService.update_conversation(
                             conn, conversation_id, current_user.id, title
@@ -848,8 +707,8 @@ async def chat(
 
         return ChatResponse(response=response, conversation_id=conversation_id)
     except Exception as e:
-        logger.error(f"✗ 响应生成失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("响应生成失败 (%s)", type(e).__name__)
+        raise HTTPException(status_code=502, detail="模型请求失败，请检查个人模型设置") from None
 
 
 @app.post("/api/chat/stream")
@@ -867,9 +726,14 @@ async def chat_stream(
     Returns:
         Streaming response from the agent
     """
-    if agent is None:
-        raise HTTPException(status_code=503, detail="Agent not initialized")
+    if db.pool is None:
+        raise HTTPException(status_code=503, detail="服务正在初始化")
 
+    async with db.pool.acquire() as settings_conn:
+        model_config = await resolve_user_model(settings_conn, current_user.id)
+    if not model_config.api_key.get_secret_value():
+        raise HTTPException(400, detail="请先在设置中配置个人模型")
+    active_agent = NewsAgent(tools=[fetch_weibo_hot_search], model_config=model_config)
     conversation_id = request.conversation_id
     async with db.pool.acquire() as conn:
         # Create or get conversation
@@ -914,7 +778,7 @@ async def chat_stream(
             yield f"data: {json.dumps({'type': 'start', 'message': '正在处理您的请求...'})}\n\n"
 
             # Stream the response
-            async for chunk in agent.chat_stream(request.message, history):
+            async for chunk in active_agent.chat_stream(request.message, history):
                 full_response += chunk
                 # Send SSE format
                 yield f"data: {json.dumps({'content': chunk})}\n\n"
@@ -936,7 +800,7 @@ async def chat_stream(
                     # Send title generation progress
                     yield f"data: {json.dumps({'type': 'progress', 'message': '正在生成对话标题...'})}\n\n"
                     # For streaming, we have the first user message and full response
-                    title = await generate_conversation_title(request.message, full_response)
+                    title = await generate_conversation_title(request.message, full_response, active_agent)
                     await ConversationService.update_conversation(
                         conn, conversation_id, current_user.id, title
                     )
@@ -950,8 +814,8 @@ async def chat_stream(
             # Send end signal with conversation_id to ensure onComplete is called exactly once
             yield f"data: {json.dumps({'conversation_id': conversation_id, 'done': True})}\n\n"
         except Exception as e:
-            logger.error(f"✗ [流式] 响应生成失败: {e}", exc_info=True)
-            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+            logger.error("流式响应生成失败 (%s)", type(e).__name__)
+            yield f"data: {json.dumps({'error': '模型请求失败，请检查个人模型设置'})}\n\n"
 
     return StreamingResponse(
         generate(),

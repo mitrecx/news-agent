@@ -9,7 +9,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 
-async def _fetch_and_save_hot_search_titles_async(limit: int = 50):
+async def _fetch_and_save_hot_search_titles_async(limit: int = 50, user_id: int | None = None):
     """
     异步函数：抓取并保存热搜标题
 
@@ -40,13 +40,13 @@ async def _fetch_and_save_hot_search_titles_async(limit: int = 50):
         logger.info(f"🔍 开始抓取微博热搜标题，数量: {limit}")
 
         # 1. 获取爬虫实例（不使用全局单例的缓存管理器）
-        scraper = get_scraper()
+        scraper = WeiboScraper(use_selenium=settings.weibo_use_selenium, cookie=settings.weibo_cookie)
 
         # 重置缓存管理器，使用当前线程的连接池
         scraper._cache_manager = WeiboHotSearchCache(pool)
 
         # 2. 只抓取标题（不获取描述）
-        items = await scraper.fetch_hot_search(limit=limit, fetch_descriptions=False)
+        items = await scraper._fetch_hot_search_items(limit)
         logger.info(f"✅ 抓取到 {len(items)} 条热搜")
 
         # 3. 去重：检查哪些热搜已存在
@@ -96,12 +96,13 @@ async def _fetch_and_save_hot_search_titles_async(limit: int = 50):
 
         # 6. 为每条新增热搜触发异步描述生成任务
         tasks_queued = 0
-        for item in new_items:
+        for item in new_items if user_id is not None else []:
             try:
                 fetch_and_update_description.delay(
                     title=item.title,
                     url=item.url,
-                    rank=item.rank
+                    rank=item.rank,
+                    user_id=user_id
                 )
                 tasks_queued += 1
             except Exception as e:
@@ -190,7 +191,7 @@ def fetch_and_save_hot_search_titles(self, limit: int = 50):
         }
 
 
-async def _fetch_and_update_description_async(title: str, url: str, rank: int):
+async def _fetch_and_update_description_async(title: str, url: str, rank: int, model_config=None, user_id: int | None = None, pool=None):
     """
     异步函数：抓取并更新单条热搜描述
 
@@ -207,6 +208,7 @@ async def _fetch_and_update_description_async(title: str, url: str, rank: int):
         title: 热搜标题
         url: 热搜链接
         rank: 热搜排名
+        pool: API 请求可复用应用连接池，独立任务自行创建并关闭连接池
 
     Returns:
         dict: 结果信息
@@ -218,18 +220,26 @@ async def _fetch_and_update_description_async(title: str, url: str, rank: int):
 
     settings = get_settings()
 
-    # 创建数据库连接池
-    pool = await asyncpg.create_pool(
-        host=settings.db_host,
-        port=settings.db_port,
-        user=settings.db_user,
-        password=settings.db_password,
-        database=settings.db_name,
-        min_size=1,
-        max_size=10
-    )
+    owns_pool = pool is None
+    if owns_pool:
+        pool = await asyncpg.create_pool(
+            host=settings.db_host,
+            port=settings.db_port,
+            user=settings.db_user,
+            password=settings.db_password,
+            database=settings.db_name,
+            min_size=1,
+            max_size=10
+        )
 
     try:
+        if model_config is None:
+            if user_id is None:
+                return {"title": title, "rank": rank, "success": False, "error": "请先选择模型后再生成摘要"}
+            from ..settings.service import ModelSettingsService
+            async with pool.acquire() as conn:
+                model_config = await ModelSettingsService.resolve(conn, user_id)
+
         logger.info(f"📝 开始为热搜生成描述：[{rank}] {title}")
 
         # 如果URL为空，无法获取内容，直接返回失败
@@ -249,11 +259,11 @@ async def _fetch_and_update_description_async(title: str, url: str, rank: int):
         if settings.use_selenium_for_descriptions:
             # ========== 旧方案：使用 Selenium 爬虫 ==========
             logger.info(f"  → 使用旧方案（Selenium 爬虫）")
-            return await _fetch_with_selenium(title, url, rank, pool, settings)
+            return await _fetch_with_selenium(title, url, rank, pool, settings, model_config)
         else:
             # ========== 新方案：使用 HTTP 爬虫 ==========
             logger.info(f"  → 使用新方案（HTTP 爬虫）")
-            return await _fetch_with_http(title, url, rank, pool)
+            return await _fetch_with_http(title, url, rank, pool, model_config)
 
     except Exception as e:
         logger.error(f"❌ 描述生成失败：{title}, 错误: {e}", exc_info=True)
@@ -270,10 +280,11 @@ async def _fetch_and_update_description_async(title: str, url: str, rank: int):
         }
 
     finally:
-        await pool.close()
+        if owns_pool:
+            await pool.close()
 
 
-async def _fetch_with_selenium(title: str, url: str, rank: int, pool, settings):
+async def _fetch_with_selenium(title: str, url: str, rank: int, pool, settings, model_config=None):
     """
     旧方案：使用 Selenium 爬虫获取微博内容
 
@@ -302,7 +313,7 @@ async def _fetch_with_selenium(title: str, url: str, rank: int, pool, settings):
 
         if content:
             # 使用微博内容生成描述
-            description = await summarize_weibo_content(title, content)
+            description = await summarize_weibo_content(title, content, model_config)
             if description:
                 # 保存到数据库
                 cache = WeiboHotSearchCache(pool)
@@ -348,7 +359,7 @@ async def _fetch_with_selenium(title: str, url: str, rank: int, pool, settings):
         }
 
 
-async def _fetch_with_http(title: str, url: str, rank: int, pool):
+async def _fetch_with_http(title: str, url: str, rank: int, pool, model_config=None):
     """
     新方案：使用 HTTP 爬虫获取微博内容
 
@@ -417,7 +428,7 @@ async def _fetch_with_http(title: str, url: str, rank: int, pool):
     # 生成描述
     if content:
         # 使用微博内容生成描述
-        description = await summarize_weibo_content(title, content)
+        description = await summarize_weibo_content(title, content, model_config)
         if description:
             # 保存到数据库
             cache = WeiboHotSearchCache(pool)
@@ -459,7 +470,7 @@ async def _fetch_with_http(title: str, url: str, rank: int, pool):
     max_retries=3,
     default_retry_delay=60,  # 1分钟后重试
 )
-def fetch_and_update_description(self, title: str, url: str, rank: int):
+def fetch_and_update_description(self, title: str, url: str, rank: int, user_id: int | None = None):
     """
     异步任务：为单条热搜抓取描述并更新数据库
 
@@ -491,7 +502,7 @@ def fetch_and_update_description(self, title: str, url: str, rank: int):
 
         try:
             result = loop.run_until_complete(
-                _fetch_and_update_description_async(title, url, rank)
+                _fetch_and_update_description_async(title, url, rank, user_id=user_id)
             )
 
             if result['success']:
