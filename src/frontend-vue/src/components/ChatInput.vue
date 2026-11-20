@@ -1,245 +1,155 @@
 <template>
-  <div class="chat-input">
-    <el-input
-      ref="inputRef"
-      v-model="inputMessage"
-      type="textarea"
-      :rows="1"
-      :autosize="{ minRows: 1, maxRows: 4 }"
-      placeholder="输入消息..."
-      :disabled="isStreaming || !isConnected"
-      @keydown="handleKeydown"
-      @input="handleInput"
-    />
-    <el-button
-      :type="isStreaming ? 'danger' : 'primary'"
-      :disabled="!inputMessage.trim() || !isConnected"
-      :loading="isStreaming"
-      @click="handleSend"
-    >
-      {{ isStreaming ? '停止' : '发送' }}
-    </el-button>
+  <div class="composer">
+    <div class="composer-box">
+      <el-input
+        ref="input"
+        v-model="draft"
+        type="textarea"
+        :autosize="{ minRows: 2, maxRows: 6 }"
+        :disabled="isStreaming || !isConnected"
+        placeholder="有什么想了解的，问问我…"
+        aria-label="聊天消息"
+        @keydown="handleKeydown"
+      />
+      <div class="composer-footer">
+        <span
+          ><el-icon><MagicStick /></el-icon
+          >{{ isConnected ? '从问题出发，获得更多理解' : '正在连接服务…' }}</span
+        ><button
+          v-if="isStreaming"
+          class="send-button stop-button"
+          aria-label="停止生成"
+          @click="$emit('stop')"
+        >
+          <el-icon><VideoPause /></el-icon></button
+        ><button
+          v-else
+          class="send-button"
+          aria-label="发送消息"
+          :disabled="!draft.trim() || !isConnected"
+          @click="send"
+        >
+          <el-icon><Top /></el-icon>
+        </button>
+      </div>
+    </div>
+    <div class="composer-hint">Enter 发送 <span>·</span> Shift + Enter 换行</div>
   </div>
 </template>
-
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue'
-import { ElInput, ElButton } from 'element-plus'
+import { ref } from 'vue'
+import { ElInput } from 'element-plus'
+import { MagicStick, Top, VideoPause } from '@element-plus/icons-vue'
 import type { ChatMessage } from '@/types'
-
 const props = defineProps<{
   isStreaming: boolean
   isConnected: boolean
   messages: ChatMessage[]
 }>()
-
-const emit = defineEmits<{
-  send: [message: string]
-}>()
-
-const inputMessage = ref('')
-const inputRef = ref<InstanceType<typeof ElInput>>()
-
-// Message history for up/down arrow navigation
-const messageHistory = ref<string[]>([])
-const historyIndex = ref(-1)
-const isNavigatingHistory = ref(false)
-
-// Constants
-const MAX_HISTORY_SIZE = 10
-
-// Extract user messages from conversation to build history
-const buildHistoryFromMessages = (messages: ChatMessage[]) => {
-  const userMessages = messages
-    .filter(msg => msg.role === 'user')
-    .map(msg => msg.content.trim())
-    .filter((msg, index, arr) => msg && msg !== arr[index - 1]) // Remove duplicates
-
-  // Keep only the last MAX_HISTORY_SIZE messages
-  return userMessages.slice(-MAX_HISTORY_SIZE)
+const emit = defineEmits<{ send: [value: string]; stop: [] }>()
+const draft = ref('')
+const input = ref<InstanceType<typeof ElInput>>()
+const send = () => {
+  if (!draft.value.trim() || props.isStreaming || !props.isConnected) return
+  emit('send', draft.value.trim())
+  draft.value = ''
 }
-
-// Load message history from current conversation's messages
-onMounted(() => {
-  console.log('[ChatInput] ✅ Component mounted')
-  messageHistory.value = buildHistoryFromMessages(props.messages)
-  console.log('[ChatInput] 📚 Built history from', messageHistory.value.length, 'user messages')
-})
-
-onUnmounted(() => {
-  console.log('[ChatInput] 🗑️ Component unmounted')
-})
-
-// Watch for changes in messages and rebuild history
-watch(
-  () => props.messages,
-  (newMessages, oldMessages) => {
-    // Check if the message array reference changed (conversation switched)
-    const conversationSwitched = oldMessages !== newMessages
-
-    console.log('[ChatInput] 📝 Messages changed:', {
-      conversationSwitched,
-      newCount: newMessages.length,
-      oldCount: oldMessages?.length,
-      isNavigating: isNavigatingHistory.value
-    })
-
-    // Always rebuild when conversation switches, otherwise only if not navigating
-    if (conversationSwitched || !isNavigatingHistory.value) {
-      const newHistory = buildHistoryFromMessages(newMessages)
-      // Check if history actually changed
-      if (JSON.stringify(newHistory) !== JSON.stringify(messageHistory.value)) {
-        messageHistory.value = newHistory
-        console.log('[ChatInput] 📚 History updated, now has', messageHistory.value.length, 'messages:', newHistory)
-      }
-      // Reset navigation state when conversation switches
-      if (conversationSwitched) {
-        historyIndex.value = -1
-        isNavigatingHistory.value = false
-        inputMessage.value = ''
-        console.log('[ChatInput] 🔄 Navigation state reset for new conversation')
-      }
-    }
-  },
-  { flush: 'post' } // Ensure updates happen after DOM updates
-)
-
-const handleSend = () => {
-  const message = inputMessage.value.trim()
-  if (!message || props.isStreaming || !props.isConnected) return
-
-  console.log('[ChatInput] 📤 Emitting send event:', message)
-  emit('send', message)
-
-  // Reset history navigation
-  historyIndex.value = -1
-  inputMessage.value = ''
-  isNavigatingHistory.value = false
-
-  // History will be automatically updated when the new message is added to props.messages
-}
-
 const handleKeydown = (event: Event | KeyboardEvent) => {
-  if (!(event instanceof KeyboardEvent)) return
-
-  // Handle Enter key (send message)
-  if (event.key === 'Enter' && !event.shiftKey) {
+  if (
+    event instanceof KeyboardEvent &&
+    event.key === 'Enter' &&
+    !event.shiftKey &&
+    !event.isComposing
+  ) {
     event.preventDefault()
-    handleSend()
-    return
-  }
-
-  // Handle Arrow Up (previous message)
-  if (event.key === 'ArrowUp' && messageHistory.value.length > 0) {
-    // Always allow navigation to previous message
-    event.preventDefault()
-    navigateHistory('up')
-    return
-  }
-
-  // Handle Arrow Down (next message)
-  if (event.key === 'ArrowDown' && messageHistory.value.length > 0) {
-    // Always allow navigation to next message
-    event.preventDefault()
-    navigateHistory('down')
-    return
+    send()
   }
 }
-
-const navigateHistory = (direction: 'up' | 'down') => {
-  if (direction === 'up') {
-    // Go to previous message
-    if (historyIndex.value < messageHistory.value.length - 1) {
-      historyIndex.value++
-      isNavigatingHistory.value = true
-      inputMessage.value = messageHistory.value[messageHistory.value.length - 1 - historyIndex.value]
-    }
-  } else if (direction === 'down') {
-    // Go to next message
-    if (historyIndex.value > 0) {
-      historyIndex.value--
-      inputMessage.value = messageHistory.value[messageHistory.value.length - 1 - historyIndex.value]
-    } else if (historyIndex.value === 0) {
-      // Clear input when going back from the first historical message
-      historyIndex.value = -1
-      inputMessage.value = ''
-    }
-  }
-}
-
-const handleInput = () => {
-  // If user starts typing while navigating history, exit navigation mode
-  if (isNavigatingHistory.value) {
-    isNavigatingHistory.value = false
-    historyIndex.value = -1
-  }
-  // Auto-resize handled by el-input autosize prop
-}
-
-const focus = () => {
-  const textarea = inputRef.value?.$el?.querySelector('textarea')
-  if (textarea) {
-    textarea.focus()
-  }
-}
-
 defineExpose({
-  focus
+  focus: () => input.value?.focus(),
+  setDraft: (value: string) => {
+    draft.value = value
+  },
 })
 </script>
-
 <style scoped>
-.chat-input {
-  display: flex;
-  gap: 12px;
-  padding: 20px;
-  border-top: 1px solid #e5e7eb;
-  background: white;
+.composer {
+  flex-shrink: 0;
+  padding: 0 30px;
 }
-
-.chat-input :deep(.el-textarea) {
-  flex: 1;
+.composer-box {
+  border: 1px solid #dce7e3;
+  box-shadow: 0 3px 14px #325b4204;
+  border-radius: 11px;
+  padding: 13px 15px 10px;
+  background: #fff;
 }
-
-.chat-input :deep(.el-textarea__inner) {
-  border-radius: 24px;
-  padding: 12px 16px;
-  font-size: 14px;
+.composer-box:focus-within {
+  border-color: #93b6a6;
+}
+.composer :deep(.el-textarea__inner) {
   resize: none;
+  box-shadow: none;
+  padding: 0;
+  background: transparent;
+  color: #57706f;
+  font-size: 12px;
+  line-height: 1.8;
 }
-
-.chat-input :deep(.el-textarea__inner):focus {
-  border-color: #667eea;
+.composer :deep(.el-textarea__inner::placeholder) {
+  color: #abb8bd;
 }
-
-.chat-input :deep(.el-button) {
-  border-radius: 24px;
-  padding: 12px 24px;
-  font-size: 14px;
-  font-weight: 500;
-  height: auto;
-  align-self: flex-end;
+.composer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
 }
-
-.chat-input :deep(.el-button--primary) {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+.composer-footer > span {
+  color: #a5b9b0;
+  font-size: 9px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.send-button {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background: #3f8570;
+  color: #fff;
   border: none;
+  font-size: 17px;
 }
-
-.chat-input :deep(.el-button--primary:hover) {
-  opacity: 0.9;
+.send-button:disabled {
+  background: #e6efea;
+  color: #b1c8bd;
 }
-
-.chat-input :deep(.el-button--danger) {
-  background: linear-gradient(135deg, #f87171 0%, #ef4444 100%);
-  border: none;
+.stop-button {
+  background: #8ca69b;
 }
-
-.chat-input :deep(.el-button--danger:hover) {
-  opacity: 0.9;
+.composer-hint {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  color: #b6c1c6;
+  font-size: 8px;
+  margin-top: 8px;
 }
-
-.chat-input :deep(.el-button.is-disabled) {
-  opacity: 0.5;
+.composer-hint span {
+  color: #ccd3d8;
+}
+@media (max-width: 760px) {
+  .composer {
+    padding: 0 15px;
+  }
+  .composer-footer > span {
+    font-size: 8px;
+  }
+  .composer-box {
+    padding: 12px;
+  }
 }
 </style>

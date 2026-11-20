@@ -4,13 +4,15 @@ import asyncio
 import logging
 import os
 import tempfile
+import json
 from pathlib import Path
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
+from ..auth.router import get_current_user
 from fastapi.responses import JSONResponse
 
 from .models import WeiboLoginRequest, WeiboLoginResponse
 
-router = APIRouter(prefix="/api/weibo", tags=["weibo"])
+router = APIRouter(prefix="/api/weibo", tags=["weibo"], dependencies=[Depends(get_current_user)])
 logger = logging.getLogger(__name__)
 
 
@@ -342,7 +344,7 @@ def _perform_weibo_login_sync(username: str, password: str) -> dict:
                 'error': 'Failed to extract cookie'
             }
 
-        logger.info(f"✅ Cookie 提取成功: {cookie_string[:50]}...")
+        logger.info("✅ Cookie 提取成功")
 
         return {
             'success': True,
@@ -397,14 +399,14 @@ async def _update_env_file(cookie: str) -> bool:
 
         for line in lines:
             if line.strip().startswith('WEIBO_COOKIE='):
-                new_lines.append(f'WEIBO_COOKIE="{cookie}"')
+                new_lines.append(f'WEIBO_COOKIE={json.dumps(cookie)}')
                 updated = True
             else:
                 new_lines.append(line)
 
         # 如果没有找到，添加新行
         if not updated:
-            new_lines.append(f'WEIBO_COOKIE="{cookie}"')
+            new_lines.append(f'WEIBO_COOKIE={json.dumps(cookie)}')
 
         # 写回文件
         env_path.write_text('\n'.join(new_lines) + '\n', encoding='utf-8')
@@ -503,7 +505,7 @@ async def get_cookie_status():
     return {
         "has_cookie": has_cookie,
         "cookie_length": len(settings.weibo_cookie) if has_cookie else 0,
-        "cookie_preview": settings.weibo_cookie[:20] + "..." if has_cookie and len(settings.weibo_cookie) > 20 else None
+        "cookie_preview": None
     }
 
 
@@ -556,10 +558,10 @@ async def manual_cookie(request: dict):
             "error": "Empty cookie"
         }
     
-    logger.info(f"📥 收到手动 Cookie 输入: {cookie[:50]}...")
+    logger.info("📥 收到手动 Cookie 更新请求")
     
     # 验证 Cookie 格式
-    if 'SUB=' not in cookie:
+    if not isinstance(cookie, str) or '\n' in cookie or '\r' in cookie or not any(part.strip().startswith('SUB=') and part.strip()[4:] for part in cookie.split(';')):
         return {
             "success": False,
             "cookie": None,
@@ -573,7 +575,7 @@ async def manual_cookie(request: dict):
     if success:
         return {
             "success": True,
-            "cookie": cookie,
+            "cookie": None,
             "message": "Cookie 保存成功",
             "error": None
         }

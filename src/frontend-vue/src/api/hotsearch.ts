@@ -3,6 +3,7 @@ import request from '@/utils/request'
 /** 热搜缓存条目 */
 export interface HotSearchCacheItem {
   title_hash: string
+  url?: string
   title: string
   description: string
   description_source: string
@@ -47,6 +48,11 @@ export interface FetchMissingResponse {
   success_count: number
   failed_count: number
   items: TaskResult[]
+}
+
+export interface SingleSummaryResponse {
+  status: 'generated' | 'cached'
+  item: HotSearchCacheItem
 }
 
 /** 任务结果项 */
@@ -110,37 +116,47 @@ export interface HasDescriptionResponse {
 }
 
 /** 获取有描述的热搜列表 */
-export const getHasDescriptionItems = (params?: {
-  limit?: number
-}) => {
-  return request.get<HasDescriptionResponse>('/weibo/cache/has-description', { params })
+export const getHasDescriptionItems = (params?: { limit?: number }) => {
+  return request.get<HasDescriptionResponse>('/weibo/cache/has-description', {
+    params,
+  })
 }
 
 /** 手动触发抓取缺失描述的任务 */
-export const fetchMissingDescriptions = (params: {
-  limit?: number
-}) => {
+export const fetchMissingDescriptions = (params: { limit?: number }) => {
   // 为批量抓取描述设置更长的超时时间（5分钟）
   // 因为需要处理多个热搜，每个都需要 Selenium + LLM 生成
   return request.post<FetchMissingResponse>('/weibo/cache/fetch-missing', null, {
     params,
-    timeout: 300000 // 5分钟超时
+    timeout: 300000, // 5分钟超时
   })
 }
 
+/** 只获取指定资讯的微博内容并生成摘要。 */
+export const fetchStorySummary = (titleHash: string) => {
+  return request.post<SingleSummaryResponse>(
+    `/weibo/cache/${encodeURIComponent(titleHash)}/summary`,
+    null,
+    { timeout: 180000 },
+  )
+}
+
 /** 手动触发抓取微博热搜 */
-export const fetchHotSearch = (params: {
-  limit?: number
-}) => {
+export const fetchHotSearch = (params: { limit?: number }) => {
   return request.post<FetchHotSearchResponse>('/weibo/cache/fetch-hot-search', null, { params })
 }
 
 /** 删除单个热搜 */
 export const deleteHotSearch = (title: string) => {
-  return request.delete<{message: string, title: string}>(`/weibo/cache/item/${encodeURIComponent(title)}`)
+  return request.delete<{ message: string; title: string }>(
+    `/weibo/cache/item/${encodeURIComponent(title)}`,
+  )
 }
 
 /** 批量删除热搜 */
 export const batchDeleteHotSearches = (titles: string[]) => {
-  return request.delete<{message: string, count: number, requested: number}>('/weibo/cache/batch', { data: { titles } })
+  return request.delete<{ message: string; count: number; requested: number }>(
+    '/weibo/cache/batch',
+    { data: { titles } },
+  )
 }

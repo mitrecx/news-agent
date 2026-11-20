@@ -653,7 +653,7 @@ class WeiboScraper:
             logger.error(f"爬取微博详情页失败: {e}")
             return ""
 
-    async def fetch_hot_search(self, limit: int = 40, fetch_descriptions: bool = False) -> list[HotSearchItem]:
+    async def fetch_hot_search(self, limit: int = 40, fetch_descriptions: bool = False, model_config=None) -> list[HotSearchItem]:
         """
         获取微博热搜榜
 
@@ -676,12 +676,9 @@ class WeiboScraper:
         missing_items = [item for item in items if not item.description]
 
         if fetch_descriptions:
-            # 同步生成
-            await self._generate_descriptions_sync(missing_items)
-        else:
-            # 后台异步生成
-            if missing_items:
-                asyncio.create_task(self._generate_descriptions_async(missing_items))
+            if model_config is None:
+                raise ValueError("生成摘要前需要指定已启用的模型")
+            await self._generate_descriptions_sync(missing_items, model_config)
 
         return items
 
@@ -791,7 +788,7 @@ class WeiboScraper:
 
         logger.info(f"✓ Cache loaded: {cache_hits}/{len(items)} hits")
 
-    async def _generate_descriptions_async(self, items: list) -> None:
+    async def _generate_descriptions_async(self, items: list, model_config) -> None:
         """
         后台异步生成描述
 
@@ -832,7 +829,7 @@ class WeiboScraper:
                     # 使用 LLM 总结
                     if content:
                         from .llm_summary import summarize_weibo_content
-                        description = await summarize_weibo_content(item.title, content)
+                        description = await summarize_weibo_content(item.title, content, model_config)
                         if description:
                             item.description = description
                             item.description_source = "weibo_detail"
@@ -873,7 +870,7 @@ class WeiboScraper:
         print(f"{'='*60}")
         logger.info(f"✅ 后台任务完成")
 
-    async def _generate_descriptions_sync(self, items: list) -> None:
+    async def _generate_descriptions_sync(self, items: list, model_config) -> None:
         """
         同步生成描述
 
@@ -884,7 +881,7 @@ class WeiboScraper:
             return
 
         logger.info(f"📝 同步生成描述，共 {len(items)} 条")
-        await self._generate_descriptions_async(items)
+        await self._generate_descriptions_async(items, model_config)
 
     async def get_hot_search_summary(self, limit: int = 40) -> str:
         """
@@ -934,4 +931,13 @@ def get_scraper(use_selenium: bool | None = None) -> WeiboScraper:
             cookie = None
 
         _scraper = WeiboScraper(use_selenium=use_selenium, cookie=cookie)
+    else:
+        from ..agent.config import get_settings
+        cookie = get_settings().weibo_cookie
+        if _scraper.cookie != cookie:
+            _scraper.cookie = cookie
+            if cookie:
+                _scraper.headers["Cookie"] = cookie
+            else:
+                _scraper.headers.pop("Cookie", None)
     return _scraper

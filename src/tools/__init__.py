@@ -34,7 +34,7 @@ async def fetch_weibo_hot_search(limit: int = 40) -> str:
 
     scraper = get_scraper()
     try:
-        # 获取热搜（描述在后台异步生成）
+        # 获取热搜并读取已有摘要，生成摘要由用户主动发起
         items = await scraper.fetch_hot_search(limit, fetch_descriptions=False)
 
         # 统计描述状态
@@ -53,7 +53,7 @@ async def fetch_weibo_hot_search(limit: int = 40) -> str:
 
         # 如果有描述正在生成，添加提示
         if with_desc < len(items):
-            result += "\n\n💡 部分热搜的详细描述正在后台生成中，请稍后刷新查看。"
+            result += "\n\n💡 部分热搜尚无摘要，可在热点资讯页面使用当前模型生成。"
 
         return result
 

@@ -41,7 +41,7 @@ def clean_description_text(text: str) -> str:
     return text
 
 
-async def summarize_weibo_content(title: str, content: str) -> str | None:
+async def summarize_weibo_content(title: str, content: str, model_config=None) -> str | None:
     """
     使用 LLM 总结微博内容
 
@@ -52,26 +52,20 @@ async def summarize_weibo_content(title: str, content: str) -> str | None:
     Returns:
         500字左右的描述，如果内容为空返回 None
     """
+    if model_config is None:
+        raise ValueError("请先在设置中添加并启用一个模型")
+
     # 如果内容为空，返回 None
     if not content or len(content.strip()) < 10:
         logger.info(f"⚠️ 内容为空，不生成描述: {title}")
         return None
 
     try:
-        from langchain_openai import ChatOpenAI
         from langchain_core.prompts import ChatPromptTemplate
-        from ..agent.config import get_settings
-
-        settings = get_settings()
+        from ..agent.base import create_llm
 
         # 创建 LLM
-        llm = ChatOpenAI(
-            model=settings.agent_model,
-            api_key=settings.deepseek_api_key,
-            base_url=settings.deepseek_base_url,
-            temperature=0.7,
-            max_tokens=500,
-        )
+        llm = create_llm(model_config)
 
         # 创建提示模板
         prompt = ChatPromptTemplate.from_messages([
@@ -110,7 +104,7 @@ async def summarize_weibo_content(title: str, content: str) -> str | None:
         return "Agent总结: " + description
 
     except Exception as e:
-        logger.error(f"❌ LLM 总结失败: {e}", exc_info=True)
+        logger.error("LLM 总结失败 (%s)", type(e).__name__)
 
         # 降级方案：截取内容
         if content and len(content) > 100:
@@ -122,7 +116,7 @@ async def summarize_weibo_content(title: str, content: str) -> str | None:
             return None
 
 
-async def summarize_weibo_batch(items: list, max_concurrent: int = 3) -> None:
+async def summarize_weibo_batch(items: list, max_concurrent: int = 3, model_config=None) -> None:
     """
     批量总结微博热搜（并发控制）
 
@@ -146,7 +140,7 @@ async def summarize_weibo_batch(items: list, max_concurrent: int = 3) -> None:
 
                 # 生成描述
                 if content:
-                    description = await summarize_weibo_content(item.title, content)
+                    description = await summarize_weibo_content(item.title, content, model_config)
                     if description:
                         item.description = description
                         item.description_source = "weibo_detail"

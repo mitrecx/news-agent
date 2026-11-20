@@ -35,6 +35,7 @@ async def migrate():
                 id SERIAL PRIMARY KEY,
                 title_hash VARCHAR(64) NOT NULL UNIQUE,
                 title VARCHAR(500) NOT NULL,
+                url TEXT NOT NULL DEFAULT '',
                 description TEXT NOT NULL,
                 description_source VARCHAR(50) NOT NULL,
                 created_at TIMESTAMP NOT NULL DEFAULT NOW(),
@@ -44,6 +45,7 @@ async def migrate():
             )
         """)
         print("✓ Table created")
+        await conn.execute("ALTER TABLE weibo_hot_search_cache ADD COLUMN IF NOT EXISTS url TEXT NOT NULL DEFAULT ''")
 
         # Create indexes
         print("\nCreating indexes...")

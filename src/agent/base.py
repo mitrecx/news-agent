@@ -3,33 +3,30 @@
 from langchain_openai import ChatOpenAI
 from langchain_core.language_models import BaseChatModel
 from langchain_core.runnables import RunnableConfig
-from .config import get_settings
 
 
-def create_llm() -> BaseChatModel:
+def create_llm(model_config=None) -> BaseChatModel:
     """Create and configure the DeepSeek LLM instance"""
-    settings = get_settings()
-
+    if model_config is None:
+        raise ValueError("请先在设置中添加并启用一个模型")
     return ChatOpenAI(
-        model=settings.agent_model,
-        api_key=settings.deepseek_api_key,
-        base_url=settings.deepseek_base_url,
-        temperature=settings.agent_temperature,
-        max_tokens=settings.agent_max_tokens,
+        model=model_config.model, api_key=model_config.api_key.get_secret_value(),
+        base_url=model_config.base_url, temperature=model_config.temperature,
+        max_tokens=model_config.max_tokens,
     )
 
 
 class NewsAgent:
     """Basic news agent powered by DeepSeek"""
 
-    def __init__(self, tools: list | None = None):
+    def __init__(self, tools: list | None = None, model_config=None):
         """
         Initialize the news agent
 
         Args:
             tools: Optional list of LangChain tools to bind to the LLM
         """
-        self.llm = create_llm()
+        self.llm = create_llm(model_config)
         self.tools = tools or []
 
         # Bind tools to LLM if provided
@@ -204,8 +201,8 @@ class NewsAgent:
                 yield "抱歉，请求超时，请重试。"
                 return
             except Exception as e:
-                logger.error(f"chat_stream: ainvoke error: {e}", exc_info=True)
-                yield f"抱歉，发生错误: {str(e)}"
+                logger.error("chat_stream: model request failed (%s)", type(e).__name__)
+                yield "模型请求失败，请在设置中检查模型名称、API 地址和密钥。"
                 return
 
             # Handle tool calls
@@ -247,8 +244,8 @@ class NewsAgent:
                                 yield "\n\n抱歉，工具执行超时，请重试。"
                                 return
                             except Exception as e:
-                                logger.error(f"chat_stream: tool execution error: {e}", exc_info=True)
-                                yield f"\n\n抱歉，工具执行失败: {str(e)}"
+                                logger.error("chat_stream: tool execution failed (%s)", type(e).__name__)
+                                yield "\n\n资讯获取失败，请检查微博连接后重试。"
                                 return
                             break
 
@@ -262,8 +259,8 @@ class NewsAgent:
                         if hasattr(chunk, 'content') and chunk.content:
                             yield chunk.content
                 except Exception as e:
-                    logger.error(f"chat_stream: final response streaming error: {e}", exc_info=True)
-                    yield f"\n\n抱歉，生成响应时出错: {str(e)}"
+                    logger.error("chat_stream: model streaming failed (%s)", type(e).__name__)
+                    yield "\n\n模型连接中断，请检查配置后重试。"
             else:
                 # No tool calls needed, stream the response
                 logger.info("[DEBUG] No tool calls detected, yielding content directly")

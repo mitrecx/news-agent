@@ -1,351 +1,293 @@
 <template>
-  <div :class="['conversation-sidebar', { collapsed: isCollapsed }]">
-    <div class="sidebar-header">
-      <template v-if="!isCollapsed">
-        <h3>对话历史</h3>
-        <el-button type="primary" size="small" :icon="Plus" @click="handleNewChat">
-          新对话
-        </el-button>
-      </template>
-      <template v-else>
-        <el-button type="primary" size="small" :icon="Plus" circle @click="handleNewChat" />
-      </template>
-      <el-button
-        class="collapse-btn"
-        :icon="isCollapsed ? DArrowRight : DArrowLeft"
-        text
-        @click="toggleCollapse"
+  <aside class="conversation-sidebar" :class="{ expanded: mobileOpen }">
+    <div class="conversation-sidebar-top">
+      <span>对话记录</span
+      ><el-button :icon="Plus" aria-label="新对话" size="small" :disabled="busy" @click="newChat"
+        >新对话</el-button
+      ><button
+        class="history-toggle icon-button"
+        aria-label="切换对话历史"
+        :aria-expanded="mobileOpen"
+        @click="mobileOpen = !mobileOpen"
+      >
+        <el-icon><Clock /></el-icon>
+      </button>
+    </div>
+    <div class="conversation-search">
+      <el-input
+        v-model="search"
+        placeholder="查找对话"
+        :prefix-icon="Search"
+        clearable
+        size="small"
       />
     </div>
-
-    <div class="sidebar-content" v-show="!isCollapsed">
-      <el-empty
-        v-if="!conversationStore.isLoading && conversationStore.conversations.length === 0"
-        description="暂无对话记录"
-        :image-size="80"
-      />
-
-      <div v-loading="conversationStore.isLoading" class="conversation-list">
-        <div
-          v-for="conversation in conversationStore.conversations"
-          :key="conversation.id"
-          :class="[
-            'conversation-item',
-            { active: conversation.id === conversationStore.currentConversationId }
-          ]"
-          @click="handleSelectConversation(conversation.id)"
+    <div class="conversation-history">
+      <span class="history-label">最近的对话</span>
+      <p v-if="!filtered.length" class="history-empty">
+        {{ search ? '没有匹配的对话' : '你的对话会保存在这里' }}
+      </p>
+      <div
+        v-for="item in filtered"
+        :key="item.id"
+        class="history-item"
+        :class="{ active: store.currentConversationId === item.id }"
+      >
+        <button :disabled="busy" @click="select(item.id)">
+          <el-icon><ChatLineRound /></el-icon><span>{{ item.title }}</span></button
+        ><el-dropdown trigger="click"
+          ><button
+            class="history-more icon-button"
+            :aria-label="`管理对话 ${item.title}`"
+            :disabled="busy"
+          >
+            <el-icon><MoreFilled /></el-icon></button
+          ><template #dropdown
+            ><el-dropdown-menu
+              ><el-dropdown-item @click="rename(item)">重命名</el-dropdown-item
+              ><el-dropdown-item @click="remove(item)">删除</el-dropdown-item></el-dropdown-menu
+            ></template
+          ></el-dropdown
         >
-          <div class="conversation-main">
-            <el-icon class="conversation-icon"><ChatDotRound /></el-icon>
-            <div class="conversation-info">
-              <div class="conversation-title">{{ conversation.title }}</div>
-              <div class="conversation-time">{{ formatTime(conversation.updated_at) }}</div>
-            </div>
-          </div>
-
-          <div class="conversation-actions" @click.stop>
-            <el-dropdown trigger="click">
-              <el-icon :size="16" class="more-icon"><MoreFilled /></el-icon>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item @click="handleRename(conversation)">
-                    <el-icon><Edit /></el-icon>
-                    重命名
-                  </el-dropdown-item>
-                  <el-dropdown-item @click="handleDelete(conversation)" divided>
-                    <el-icon><Delete /></el-icon>
-                    删除
-                  </el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
-          </div>
-        </div>
       </div>
     </div>
-
-    <!-- 重命名对话框 -->
-    <el-dialog v-model="renameDialogVisible" title="重命名对话" width="400px">
-      <el-input
-        v-model="newTitle"
-        placeholder="请输入新的对话标题"
-        maxlength="200"
-        show-word-limit
-      />
-      <template #footer>
-        <el-button @click="renameDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="confirmRename">确定</el-button>
-      </template>
-    </el-dialog>
-  </div>
+    <footer>
+      <el-icon><Lock /></el-icon>对话记录仅对你可见
+    </footer>
+  </aside>
 </template>
-
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import {
-  ElMessage,
-  ElMessageBox,
-  ElButton,
-  ElEmpty,
-  ElIcon,
-  ElDropdown,
-  ElDropdownMenu,
-  ElDropdownItem,
-  ElDialog,
-  ElInput,
-  vLoading
-} from 'element-plus'
-import { Plus, ChatDotRound, MoreFilled, Edit, Delete, DArrowLeft, DArrowRight } from '@element-plus/icons-vue'
+import { computed, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Search, ChatLineRound, MoreFilled, Lock, Clock } from '@element-plus/icons-vue'
 import { useConversationStore } from '@/stores/conversation'
-import { useChatStream } from '@/composables/useChatStream'
-import { formatDistanceToNow } from 'date-fns'
-import { zhCN } from 'date-fns/locale'
 import type { Conversation } from '@/types'
-
-const conversationStore = useConversationStore()
-const { loadConversation, startNewConversation } = useChatStream()
-
-const renameDialogVisible = ref(false)
-const newTitle = ref('')
-const renamingConversation = ref<Conversation | null>(null)
-const isCollapsed = ref(false)
-
-const toggleCollapse = () => {
-  isCollapsed.value = !isCollapsed.value
+defineProps<{ busy: boolean }>()
+const emit = defineEmits<{ new: []; select: [id: number] }>()
+const store = useConversationStore()
+const search = ref('')
+const mobileOpen = ref(false)
+const newChat = () => {
+  mobileOpen.value = false
+  emit('new')
 }
-
-onMounted(() => {
-  conversationStore.fetchConversations()
-})
-
-const handleNewChat = () => {
-  startNewConversation()
+const select = (id: number) => {
+  mobileOpen.value = false
+  emit('select', id)
 }
-
-const handleSelectConversation = async (id: number) => {
-  if (conversationStore.currentConversationId === id) return
-  await loadConversation(id)
-}
-
-const handleRename = (conversation: Conversation) => {
-  renamingConversation.value = conversation
-  newTitle.value = conversation.title
-  renameDialogVisible.value = true
-}
-
-const confirmRename = async () => {
-  if (!renamingConversation.value) return
-
-  const success = await conversationStore.renameConversation(
-    renamingConversation.value.id,
-    newTitle.value.trim()
-  )
-
-  if (success) {
-    ElMessage.success('重命名成功')
-    renameDialogVisible.value = false
-  } else {
-    ElMessage.error('重命名失败')
+const filtered = computed(() =>
+  store.conversations.filter((item) =>
+    item.title.toLowerCase().includes(search.value.toLowerCase()),
+  ),
+)
+const rename = async (item: Conversation) => {
+  try {
+    const result = await ElMessageBox.prompt('为这段对话取个名字', '重命名对话', {
+      inputValue: item.title,
+      confirmButtonText: '保存',
+      cancelButtonText: '取消',
+      inputValidator: (value) =>
+        (!!value?.trim() && value.length <= 200) || '请输入 1 到 200 字的标题',
+    })
+    if (await store.renameConversation(item.id, result.value.trim()))
+      ElMessage.success('对话已重命名')
+  } catch {
+    /* 用户取消 */
   }
 }
-
-const handleDelete = (conversation: Conversation) => {
-  ElMessageBox.confirm(
-    `确定要删除对话 "${conversation.title}" 吗？此操作不可恢复。`,
-    '删除确认',
-    {
-      confirmButtonText: '确定',
+const remove = async (item: Conversation) => {
+  try {
+    await ElMessageBox.confirm(`确定删除「${item.title}」及其消息？`, '删除对话', {
+      confirmButtonText: '删除',
       cancelButtonText: '取消',
-      type: 'warning'
-    }
-  )
-    .then(async () => {
-      const success = await conversationStore.deleteConversation(conversation.id)
-      if (success) {
-        ElMessage.success('删除成功')
-        if (conversationStore.currentConversationId === conversation.id) {
-          startNewConversation()
-        }
-      } else {
-        ElMessage.error('删除失败')
-      }
+      type: 'warning',
     })
-    .catch(() => {
-      // User cancelled
-    })
-}
-
-const formatTime = (time: string) => {
-  return formatDistanceToNow(new Date(time), { addSuffix: true, locale: zhCN })
+  } catch {
+    return
+  }
+  const wasCurrent = store.currentConversationId === item.id
+  if (await store.deleteConversation(item.id)) {
+    if (wasCurrent) emit('new')
+    ElMessage.success('对话已删除')
+  }
 }
 </script>
-
 <style scoped>
-.conversation-sidebar {
-  width: 280px;
-  height: 100%;
-  background: white;
-  border-right: 1px solid #e5e7eb;
-  display: flex;
-  flex-direction: column;
-  transition: width 0.3s ease;
-}
-
-.conversation-sidebar.collapsed {
-  width: 60px;
-}
-
-.sidebar-header {
-  padding: 20px;
-  border-bottom: 1px solid #e5e7eb;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 8px;
-  position: relative;
-}
-
-.conversation-sidebar.collapsed .sidebar-header {
-  justify-content: center;
-  padding: 20px 12px;
-}
-
-.collapse-btn {
-  position: absolute;
-  right: -12px;
-  top: 24px;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border-radius: 50%;
-  background: white;
-  border: 1px solid #e5e7eb;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  z-index: 10;
-  transition: all 0.3s ease;
-}
-
-.collapse-btn:hover {
-  background: #f9fafb;
-  border-color: #667eea;
-}
-
-.conversation-sidebar.collapsed .collapse-btn {
-  right: -12px;
-}
-
-.sidebar-header h3 {
-  font-size: 16px;
-  font-weight: 600;
-  color: #1f2937;
-  margin: 0;
-  transition: opacity 0.3s ease;
-}
-
-.conversation-sidebar.collapsed .sidebar-header h3 {
+.history-toggle {
   display: none;
 }
-
-.sidebar-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 12px;
-}
-
-.conversation-list {
+.conversation-sidebar {
+  width: 220px;
+  background: #fbfcfd;
+  border-right: 1px solid var(--line);
   display: flex;
   flex-direction: column;
-  gap: 8px;
-}
-
-.conversation-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.conversation-item:hover {
-  background: #f3f4f6;
-}
-
-.conversation-item.active {
-  background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
-  border: 1px solid #667eea30;
-}
-
-.conversation-main {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex: 1;
-  min-width: 0;
-}
-
-.conversation-icon {
-  color: #667eea;
   flex-shrink: 0;
 }
-
-.conversation-info {
-  flex: 1;
-  min-width: 0;
+.conversation-sidebar-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20px 17px 18px;
 }
-
-.conversation-title {
-  font-size: 14px;
-  font-weight: 500;
-  color: #1f2937;
+.conversation-sidebar-top > span {
+  font-size: 11px;
+  color: #788c96;
+}
+.conversation-sidebar-top .el-button {
+  background: white;
+  color: #698a7d;
+  border-color: #dfe9e3;
+  font-size: 9px;
+  padding: 0 9px;
+  height: 27px;
+}
+.conversation-search {
+  padding: 0 16px 23px;
+}
+.conversation-search :deep(.el-input__wrapper) {
+  background: #f2f5f7;
+  box-shadow: none;
+  font-size: 10px;
+  height: 29px;
+}
+.history-label {
+  font-size: 9px;
+  display: block;
+  color: #acb8be;
+  padding: 0 18px 15px;
+}
+.conversation-history {
+  flex: 1;
+  overflow-y: auto;
+}
+.history-empty {
+  font-size: 10px;
+  color: #afbbc1;
+  padding: 10px 18px;
+  line-height: 1.8;
+}
+.history-item {
+  display: flex;
+  margin: 3px 10px;
+  border-radius: 7px;
+  align-items: center;
+  padding: 0 5px;
+}
+.history-item.active {
+  background: #eaf2ee;
+}
+.history-item > button {
+  border: none;
+  background: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 4px 12px 6px;
+  min-width: 0;
+  flex: 1;
+  color: #8c9ca5;
+  font-size: 10px;
+  text-align: left;
+}
+.history-item.active > button {
+  color: #5c8a77;
+}
+.history-item > button span {
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
 }
-
-.conversation-time {
-  font-size: 12px;
-  color: #9ca3af;
-  margin-top: 2px;
-}
-
-.conversation-actions {
+.history-more {
+  width: 23px;
+  font-size: 10px;
   opacity: 0;
-  transition: opacity 0.2s;
 }
-
-.conversation-item:hover .conversation-actions {
+.history-item:hover .history-more,
+.history-item.active .history-more,
+.history-more:focus-visible {
   opacity: 1;
 }
-
-.more-icon {
-  color: #9ca3af;
-  cursor: pointer;
-  padding: 4px;
-  border-radius: 4px;
+.conversation-sidebar footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 8px;
+  color: #b0bdc3;
+  padding: 20px 10px;
+  border-top: 1px solid #eff2f4;
 }
-
-.more-icon:hover {
-  background: rgba(0, 0, 0, 0.05);
-  color: #667eea;
+@media (max-width: 1100px) {
+  .conversation-sidebar {
+    width: 185px;
+  }
+  .conversation-sidebar-top {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
 }
-
-/* Scrollbar */
-.sidebar-content::-webkit-scrollbar {
-  width: 6px;
+@media (max-width: 900px) {
+  .conversation-sidebar {
+    width: 54px;
+    align-items: center;
+  }
+  .conversation-sidebar-top > span,
+  .conversation-search,
+  .conversation-history,
+  .conversation-sidebar footer {
+    display: none;
+  }
+  .conversation-sidebar-top {
+    padding: 15px 8px;
+  }
+  .conversation-sidebar-top :deep(.el-button span) {
+    display: none;
+  }
+  .conversation-sidebar-top :deep(.el-button .el-icon) {
+    margin: 0;
+  }
+  .conversation-sidebar-top .el-button {
+    width: 31px;
+    height: 31px;
+    padding: 7px;
+  }
 }
-
-.sidebar-content::-webkit-scrollbar-track {
-  background: #f1f1f1;
-}
-
-.sidebar-content::-webkit-scrollbar-thumb {
-  background: #888;
-  border-radius: 3px;
-}
-
-.sidebar-content::-webkit-scrollbar-thumb:hover {
-  background: #555;
+@media (max-width: 900px) {
+  .history-toggle {
+    display: inline-grid;
+    margin-top: 8px;
+  }
+  .conversation-sidebar-top {
+    flex-direction: column;
+  }
+  .conversation-sidebar.expanded {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 230px;
+    align-items: stretch;
+    z-index: 15;
+    box-shadow: 10px 0 30px #20364212;
+  }
+  .expanded .conversation-sidebar-top {
+    flex-direction: row;
+    padding: 15px;
+    gap: 10px;
+  }
+  .expanded .conversation-sidebar-top > span {
+    display: block;
+  }
+  .expanded .history-toggle {
+    margin-top: 0;
+  }
+  .expanded .conversation-search,
+  .expanded .conversation-history {
+    display: block;
+  }
+  .expanded footer {
+    display: flex;
+  }
 }
 </style>

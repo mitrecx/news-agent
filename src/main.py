@@ -19,7 +19,7 @@ def main():
     """)
 
     print(f"🚀 Starting server on http://{settings.host}:{settings.port}")
-    print(f"📊 Model: {settings.agent_model}")
+    print("📊 Model: configured in workspace settings")
     print(f"🌐 API Docs: http://{settings.host}:{settings.port}/docs")
     print()
 

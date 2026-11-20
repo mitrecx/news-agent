@@ -48,6 +48,8 @@ async def init_database():
             )
         """)
         print("✓ Users table created")
+        from src.settings.service import ModelSettingsService
+        await ModelSettingsService.ensure_schema(conn)
 
         # Create index on username
         print("Creating index on username...")

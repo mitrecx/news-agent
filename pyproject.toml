@@ -26,6 +26,7 @@ dependencies = [
     "celery>=5.4.0",
     "redis>=5.2.1",
     "undetected-chromedriver>=3.5.5",
+    "cryptography>=43.0.0",
 ]
 
 [project.optional-dependencies]
