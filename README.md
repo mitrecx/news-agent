@@ -4,14 +4,14 @@
 
 ## 页面与功能
 
-- **热点资讯**：左侧资讯列表、右侧阅读详情；支持搜索、日期筛选、分页、批量选择、原文链接和删除。顶部「批量生成摘要」按数量处理待生成资讯，详情中的「获取本条详情」只抓取当前选中话题并生成摘要，保留当前页码和选择。
-- **智能对话**：对话历史、Markdown 回复、请求中断，以及从资讯页带入话题。
+- **热点资讯**：单列清单展示标题、摘要状态和更新时间，点击条目进入独立详情。支持标题搜索、日期范围、摘要状态筛选和分页；返回列表时保留筛选、页码和浏览位置。采集标题后立即保存并加入摘要队列，后台逐条处理，页面自动更新「排队中 / 生成中 / 待重试 / 已有摘要」。详情可查看原文或重新排队，链接可直接打开或刷新。
+- **智能对话**：通过顶部导航进入，支持对话历史、Markdown 回复和请求中断。
 - **设置 → 模型配置**：每个用户可添加多个模型连接，独立配置显示名称、API 地址、API Key、模型 ID 和生成参数；支持获取模型列表、连接测试、编辑、删除和切换启用。
 - **设置 → 微博连接**：保存微博 Cookie 后立即对后续采集生效，无需重启。
 
 个人模型配置保存在 PostgreSQL 的 `user_model_profiles` 表，每个用户最多启用一个模型。API Key 经加密存储，接口只返回是否已设置，不回显密钥。编辑时留空 API Key 可保留该模型的密钥；新增模型需填写自己的密钥，修改 API 地址时必须重新填写对应密钥。
 
-运行时仅使用该用户已启用的模型，作用于聊天、对话标题生成和手动摘要；未配置时提示先添加模型。手动采集派生的后台摘要任务绑定发起用户，在任务执行时读取该用户的启用模型。定时采集只保存标题，不使用任何系统模型生成摘要。资讯库与微博 Cookie 当前由工作台共享，模型配置按用户隔离。
+聊天、对话标题和手动采集派生的摘要使用发起用户启用的模型。定时采集及历史待处理资讯使用 `WEIBO_SUMMARY_USERNAME` 指定账号的启用模型；配置缺失时保留任务并等待恢复，不借用其他用户的密钥。每条任务执行时读取最新的模型配置，已经开始的调用继续使用原配置。资讯库与微博 Cookie 当前由工作台共享，模型配置按用户隔离。
 
 ## 本地启动
 
@@ -30,6 +30,7 @@ cp .env.example .env
 uv run python scripts/init_db.py
 uv run python scripts/migrate_weibo_cache.py
 uv run python scripts/migrate_model_settings.py
+uv run python scripts/migrate_summary_queue.py
 ```
 
 初始化会创建本地测试账号 `test`，密码 `test123456`。
@@ -88,7 +89,11 @@ uv run --env-file .env celery -A src.celery_app worker --loglevel=info
 uv run --env-file .env celery -A src.celery_app beat --loglevel=info
 ```
 
-每 3 小时采集一次微博热搜标题，每 10 分钟清理过期数据。定时采集不生成 AI 摘要；用户可以在页面选择模型后生成。
+每 3 小时采集一次微博热搜标题，每 10 分钟清理过期数据。请在 `.env` 中设置 `WEIBO_SUMMARY_USERNAME=你的账号`，并在页面为该账号添加和启用模型；修改此项后重启后台 worker。
+
+标题与摘要任务在同一个数据库事务中保存，采集不等待正文抓取或模型调用，也不依赖 Redis 当时可用。Celery 每 5 秒检查数据库队列，每次只处理一条；处理结束立即继续下一条。数据库锁保证多个 worker 也不会并行生成摘要。
+
+网络、微博登录或模型调用失败时，任务保留并延后重试，间隔从 1 分钟逐步增加至最多 1 小时，其他任务继续处理。服务重启后恢复未完成条目，并自动补齐历史缺失摘要。Redis / worker / beat 恢复后继续消费；已成功生成的摘要不会重复处理。原文长期不可访问时会保持待重试，无法承诺每一条都能成功生成。
 
 ## 配置项
 
@@ -99,6 +104,7 @@ uv run --env-file .env celery -A src.celery_app beat --loglevel=info
 | `DEEPSEEK_API_KEY`、`DEEPSEEK_BASE_URL` | 仅供一次性导入的模型连接（运行时不读取） |
 | `AGENT_MODEL`、`AGENT_TEMPERATURE`、`AGENT_MAX_TOKENS` | 仅供一次性导入的模型 ID 及生成参数 |
 | `WEIBO_COOKIE` | 工作台共享的微博采集凭据，支持页面更新 |
+| `WEIBO_SUMMARY_USERNAME` | 定时采集与历史待处理摘要使用的模型账号，读取该账号启用的模型 |
 | `REDIS_HOST`、`REDIS_PORT` | Celery 消息队列与任务结果 |
 
 不要提交 `.env` 或凭据文件。
@@ -109,8 +115,11 @@ uv run --env-file .env celery -A src.celery_app beat --loglevel=info
 # 多模型增删改、切换、用户隔离、迁移、密钥保护、模型调用和 Cookie 即时生效
 uv run python -m unittest tests.test_model_settings -v
 
-# 单条详情只处理指定资讯，验证批量行为、重试、失败及认证边界
+# 验证单条详情、摘要状态与日期筛选、分页计数、过期数据及摘要生成边界
 uv run python -m unittest tests.test_hotsearch_summary -v
+
+# 验证采集与入队原子性、去重、逐条处理、跨 worker 互斥、重试和中断恢复
+uv run python -m unittest tests.test_summary_queue -v
 
 # 前端类型检查与生产构建
 cd src/frontend-vue
