@@ -1,1154 +1,450 @@
 <template>
-  <div class="news-page">
-    <section class="collection-bar surface" aria-label="采集与摘要操作">
-      <div class="collection-metrics">
-        <span
-          ><strong>{{ statistics.total_items }}</strong> 条资讯</span
-        ><i /><span
-          ><strong>{{ statistics.has_description_count }}</strong> 已生成摘要</span
-        ><span class="pending-count">{{ statistics.missing_count }} 条待生成</span>
+  <div v-if="!isDetail" class="news-page">
+    <section class="news-heading">
+      <div>
+        <h1>热点资讯</h1>
+        <p class="news-metrics">
+          <span>{{ statistics.total_items }} 条资讯</span><i />
+          <span>{{ statistics.has_description_count }} 条已有摘要</span><i />
+          <span>{{ statistics.missing_count }} 条待处理</span>
+        </p>
       </div>
-      <div class="collection-actions">
-        <el-button :icon="Refresh" :loading="loading" @click="refresh">刷新</el-button>
-        <div class="generate-control">
-          <el-select v-model="collectLimit" aria-label="热搜采集数量" style="width: 70px">
-            <el-option
-              v-for="count in [10, 30, 50]"
-              :key="count"
-              :label="`${count} 条`"
-              :value="count"
-            />
-          </el-select>
-          <el-button :loading="collecting" @click="collect">采集热搜</el-button>
+      <div class="news-actions" aria-label="采集与摘要操作">
+        <div class="action-group">
+          <select v-model.number="collectLimit" aria-label="热搜采集数量" :disabled="busy">
+            <option v-for="count in [10, 30, 50]" :key="count" :value="count">{{ count }} 条</option>
+          </select>
+          <el-button type="primary" :icon="Plus" :loading="collecting" :disabled="busy && !collecting" @click="collect">
+            采集热搜
+          </el-button>
         </div>
-        <div class="generate-control">
-          <el-select v-model="summaryLimit" aria-label="摘要生成数量" style="width: 70px"
-            ><el-option
-              v-for="count in [1, 3, 5, 10]"
-              :key="count"
-              :label="`${count} 条`"
-              :value="count" /></el-select
-          ><el-button
-            type="primary"
-            :icon="MagicStick"
-            :loading="generating"
-            :disabled="!!generatingHash"
-            title="按所选数量，依次为待处理资讯生成摘要"
-            @click="generateBatch"
-            >{{ generating ? '批量生成中' : '批量生成摘要' }}</el-button
-          >
-        </div>
+        <el-button class="refresh-button" :icon="Refresh" :loading="loading" :disabled="busy" aria-label="刷新资讯" @click="refresh">
+          <span>刷新</span>
+        </el-button>
       </div>
     </section>
-    <div v-if="!settings.cookieReady" class="connection-banner">
-      <el-icon><InfoFilled /></el-icon>连接微博后，可以获取正文并生成摘要。<RouterLink
-        to="/settings?tab=weibo"
-        >前往连接 →</RouterLink
-      >
+
+    <div v-if="!settings.cookieReady" class="connection-notice">
+      连接微博后可获取正文并生成摘要。<RouterLink to="/settings?tab=weibo">前往连接</RouterLink>
     </div>
     <div v-if="jobResult" class="job-result" :class="{ failed: jobResult.failed }" role="status">
-      <el-icon><CircleCheck v-if="!jobResult.failed" /><Warning v-else /></el-icon
-      ><span>{{ jobResult.message }}</span
-      ><button class="icon-button" aria-label="关闭处理结果" @click="jobResult = null">
-        <el-icon><Close /></el-icon>
-      </button>
+      <span>{{ jobResult.message }}</span>
+      <button class="icon-button" aria-label="关闭处理结果" @click="jobResult = null"><el-icon><Close /></el-icon></button>
     </div>
-    <section class="news-workspace surface">
-      <div class="news-toolbar">
-        <div class="feed-title">
-          <span class="feed-marker" />资讯库<span class="result-count">{{ total }}</span>
-        </div>
-        <div class="feed-filters">
-          <el-input
-            v-model="search"
-            placeholder="搜索热点标题"
-            clearable
-            :prefix-icon="Search"
-            @keyup.enter="applyFilters"
-            @clear="applyFilters"
-          /><el-date-picker
-            v-model="dateRange"
-            type="daterange"
-            range-separator="—"
-            start-placeholder="开始日期"
-            end-placeholder="结束日期"
-            value-format="YYYY-MM-DD"
-            :clearable="true"
-            @change="applyFilters"
-          /><el-button @click="applyFilters">筛选</el-button>
-        </div>
+
+    <form class="news-filters" aria-label="筛选资讯" @submit.prevent="applyFilters">
+      <label class="news-search">
+        <el-icon><Search /></el-icon>
+        <span class="visually-hidden">搜索标题</span>
+        <input v-model="search" type="search" placeholder="搜索标题" @input="scheduleSearch" />
+      </label>
+      <div class="date-range">
+        <input v-model="startDate" type="date" aria-label="开始日期" @change="applyFilters" />
+        <span>—</span>
+        <input v-model="endDate" type="date" aria-label="结束日期" @change="applyFilters" />
       </div>
-      <div v-if="selectedTitles.size" class="selection-bar">
-        <span>已选择 {{ selectedTitles.size }} 条</span
-        ><button @click="selectedTitles = new Set()">取消选择</button
-        ><el-button size="small" type="danger" plain @click="removeSelected">删除所选</el-button>
+      <select v-model="summaryStatus" class="status-filter" aria-label="摘要状态" @change="applyFilters">
+        <option value="all">全部摘要状态</option>
+        <option value="ready">已有摘要</option>
+        <option value="pending">待处理摘要</option>
+      </select>
+      <button v-if="hasFilters" class="text-button" type="button" @click="resetFilters">清除筛选</button>
+      <span class="sort-note">按更新时间排列</span>
+    </form>
+    <p v-if="dateError" class="filter-error" role="alert">{{ dateError }}</p>
+
+    <section v-loading="loading" class="news-results" aria-label="热搜列表" :aria-busy="loading">
+      <div v-if="error" class="news-empty" role="alert">
+        <h2>资讯加载失败</h2><p>{{ error }}</p><el-button @click="refresh">重试</el-button>
       </div>
-      <div class="news-columns">
-        <section class="feed-column" aria-label="热搜列表" v-loading="loading">
-          <div class="feed-column-label">
-            <span>资讯 · 按更新时间排列</span
-            ><span>{{ page }} / {{ Math.max(1, Math.ceil(total / pageSize)) }}</span>
-          </div>
-          <div v-if="error" class="empty-state">
-            <strong>资讯加载失败</strong>
-            <p>{{ error }}</p>
-            <el-button @click="refresh">重试</el-button>
-          </div>
-          <div v-else-if="!items.length && !loading" class="empty-state">
-            <el-icon :size="28"><Reading /></el-icon><strong>这里还没有资讯</strong>
-            <p>采集微博热搜，或调整筛选条件。</p>
-            <el-button @click="resetFilters">清除筛选</el-button>
-          </div>
-          <div v-else class="feed-list" role="region" aria-label="资讯列表滚动区" tabindex="0">
-            <article
-              v-for="(item, index) in items"
-              :key="item.title_hash"
-              class="feed-row"
-              :class="{ active: activeItem?.title_hash === item.title_hash }"
-            >
-              <el-checkbox
-                :model-value="selectedTitles.has(item.title)"
-                :aria-label="`选择 ${item.title}`"
-                @change="toggleSelection(item.title)"
-              /><button
-                class="feed-story"
-                :aria-label="`阅读 ${item.title}`"
-                @click="activeHash = item.title_hash"
-              >
-                <span class="story-meta"
-                  ><span class="story-number">{{
-                    String((page - 1) * pageSize + index + 1).padStart(2, '0')
-                  }}</span
-                  ><span>{{ shortDate(item.updated_at) }}</span
-                  ><span v-if="item.description" class="summary-ready"><i />已生成摘要</span></span
-                >
-                <h2>{{ item.title }}</h2>
-                <p v-if="item.description">
-                  {{ cleanSummary(item.description) }}
-                </p>
-                <p v-else class="awaiting-summary">等待生成摘要</p></button
-              ><span v-if="activeItem?.title_hash === item.title_hash" class="story-arrow">↗</span>
-            </article>
-          </div>
-          <footer class="feed-pagination">
-            <span>共 {{ total }} 条</span
-            ><el-pagination
-              v-model:current-page="page"
-              :page-size="pageSize"
-              :total="total"
-              layout="prev, pager, next"
-              :pager-count="5"
-              size="small"
-              @current-change="loadItems"
-            />
-          </footer>
-        </section>
-        <article v-if="activeItem" class="reader-column" aria-label="资讯详情">
-          <div class="reader-kicker">
-            <span
-              ><el-icon><Document /></el-icon>资讯详情</span
-            >
-            <div>
-              <button
-                class="icon-button"
-                title="删除资讯"
-                aria-label="删除当前资讯"
-                @click="removeOne(activeItem.title)"
-              >
-                <el-icon><Delete /></el-icon>
-              </button>
-            </div>
-          </div>
-          <div
-            :key="activeItem.title_hash"
-            class="reader-body"
-            role="region"
-            aria-label="资讯正文滚动区"
-            tabindex="0"
-          >
-            <div class="reader-meta">
-              <span class="weibo-symbol">热</span><span>微博热搜</span><i />{{
-                fullDate(activeItem.updated_at)
-              }}
-            </div>
-            <h2>{{ activeItem.title }}</h2>
-            <span class="reader-rule" />
-            <div v-if="activeItem.description" class="reader-summary">
-              <span class="summary-label"
-                ><el-icon><MagicStick /></el-icon
-                >{{ activeItem.description.startsWith('截断:') ? '正文节选' : 'AI 内容摘要' }}</span
-              >
-              <p>{{ cleanSummary(activeItem.description) }}</p>
-              <div class="summary-footnote">摘要基于微博公开内容生成，请结合原文判断。</div>
-            </div>
-            <div v-else class="reader-empty">
-              <span class="reader-empty-icon"
-                ><el-icon><MagicStick /></el-icon
-              ></span>
-              <h3>这条资讯还没有内容摘要</h3>
-              <p>只获取当前话题的微博内容，并生成摘要。</p>
-              <el-button
-                :loading="generatingHash === activeItem.title_hash"
-                :disabled="
-                  generating || (!!generatingHash && generatingHash !== activeItem.title_hash)
-                "
-                @click="generateCurrent"
-                >{{
-                  generatingHash === activeItem.title_hash ? '正在获取本条详情' : '获取本条详情'
-                }}
-                <el-icon><ArrowRight /></el-icon
-              ></el-button>
-              <p
-                v-if="singleError?.titleHash === activeItem.title_hash"
-                class="single-summary-error"
-                role="alert"
-              >
-                {{ singleError.message }}
-              </p>
-            </div>
-            <div class="reader-actions">
-              <el-button
-                v-if="activeItem.url"
-                tag="a"
-                :href="activeItem.url"
-                target="_blank"
-                rel="noopener noreferrer"
-                >阅读微博原文 <el-icon><TopRight /></el-icon></el-button
-              ><el-button type="primary" plain @click="discuss(activeItem.title)"
-                >与 AI 聊聊 <el-icon><ChatLineRound /></el-icon
-              ></el-button>
-            </div>
-          </div>
-          <div class="reader-bottom">
-            <span class="status-dot" />NEWS AGENT
-            <span>多一份理解，少一点噪声。</span>
-          </div>
-        </article>
-        <div v-else class="reader-column reader-placeholder">
-          <el-icon :size="42"><Reading /></el-icon>
-          <h2>留一点时间，了解世界。</h2>
-          <p>选择左侧资讯，在这里阅读摘要。</p>
+      <div v-else-if="dateError" class="news-empty">
+        <h2>请调整日期范围</h2><p>开始日期不能晚于结束日期。</p>
+      </div>
+      <div v-else-if="!items.length && !loading" class="news-empty">
+        <h2>{{ hasFilters ? '没有符合条件的资讯' : '还没有资讯' }}</h2>
+        <p>{{ hasFilters ? '换个关键词，或清除筛选后继续浏览。' : '点击上方「采集热搜」获取资讯。' }}</p>
+        <el-button v-if="hasFilters" @click="resetFilters">清除筛选</el-button>
+      </div>
+      <div v-else class="news-table">
+        <div class="news-table-head" aria-hidden="true">
+          <span>序号</span><span>话题标题</span><span>摘要状态</span><span class="time-column">更新时间</span><span />
         </div>
+        <RouterLink v-for="(item, index) in items" :id="`story-${item.title_hash}`" :key="item.title_hash"
+          class="news-row" :to="{ name: 'hot-search-detail', params: { titleHash: item.title_hash }, query: route.query }"
+          :aria-label="`查看详情：${item.title}`" @click="rememberList(item.title_hash)">
+          <span class="row-number">{{ String((page - 1) * pageSize + index + 1).padStart(2, '0') }}</span>
+          <h2>{{ item.title }}</h2>
+          <span class="summary-state" :class="{ ready: item.description, retrying: item.summary_status === 'retrying' }" :title="item.summary_error || ''">
+            <el-icon><Check v-if="item.description" /><Loading v-else-if="item.summary_status === 'processing'" class="is-loading" /><Document v-else /></el-icon>{{ summaryLabel(item) }}
+          </span>
+          <time class="row-time time-column" :datetime="item.updated_at">{{ formatDate(item.updated_at) }}</time>
+          <el-icon class="row-arrow"><ArrowRight /></el-icon>
+        </RouterLink>
       </div>
     </section>
-    <footer class="page-footnote">
-      <span>数据来自微博公开热搜</span
-      ><span>按用户配置生成 · {{ settings.model?.name || '未选择模型' }}</span>
-    </footer>
+    <nav v-if="total && !dateError && !error" class="news-pagination" aria-label="资讯分页">
+      <span>共 {{ total }} 条 · 每页 {{ pageSize }} 条</span>
+      <div>
+        <el-button :disabled="page === 1 || loading" @click="changePage(page - 1)">上一页</el-button>
+        <span class="page-number">{{ page }} / {{ pages }}</span>
+        <el-button :disabled="page >= pages || loading" @click="changePage(page + 1)">下一页</el-button>
+      </div>
+    </nav>
+    <footer class="news-footnote">采集后自动排队，逐条生成摘要。处理进度自动更新。</footer>
+  </div>
+
+  <div v-else class="news-reader">
+    <RouterLink class="text-button reader-back" :to="{ name: 'hot-search', query: route.query }">
+      <el-icon><Back /></el-icon>返回列表
+    </RouterLink>
+    <section v-loading="detailLoading" class="reader-sheet" :aria-busy="detailLoading" aria-label="资讯详情">
+      <div v-if="detailError" class="news-empty" role="alert">
+        <h2>暂时无法查看这条资讯</h2><p>{{ detailError }}</p><el-button @click="loadDetail()">重试</el-button>
+      </div>
+      <article v-else-if="activeItem">
+        <p class="reader-source">微博热搜</p>
+        <h1 ref="articleHeading" tabindex="-1">{{ activeItem.title }}</h1>
+        <div class="reader-meta">
+          <time :datetime="activeItem.updated_at">更新于 {{ formatDate(activeItem.updated_at, true) }}</time>
+          <span class="summary-state" :class="{ ready: activeItem.description }">
+            <el-icon><Check v-if="activeItem.description" /><Loading v-else-if="activeItem.summary_status === 'processing'" class="is-loading" /><Document v-else /></el-icon>{{ summaryLabel(activeItem) }}
+          </span>
+        </div>
+        <template v-if="activeItem.description">
+          <h2 class="article-label">{{ activeItem.description.startsWith('截断:') ? '正文节选' : '内容摘要' }}</h2>
+          <p class="article-copy">{{ cleanSummary(activeItem.description) }}</p>
+        </template>
+        <div v-else class="pending-summary">
+          <el-icon><Document /></el-icon>
+          <h2>{{ activeItem.summary_status === 'processing' ? '摘要正在生成' : activeItem.summary_status === 'retrying' ? '暂未生成，将自动重试' : '摘要已加入队列' }}</h2>
+          <p>{{ activeItem.summary_error || '后台按顺序处理，完成后会自动显示在这里。' }}</p>
+          <el-button v-if="activeItem.summary_status === 'retrying'" :loading="generatingHash === activeItem.title_hash" :disabled="busy && generatingHash !== activeItem.title_hash" @click="generateCurrent">重新排队</el-button>
+          <p v-if="singleError" class="single-error" role="alert">{{ singleError }}</p>
+        </div>
+        <div class="reader-actions">
+          <el-button v-if="sourceUrl" tag="a" :href="sourceUrl" target="_blank" rel="noopener noreferrer">
+            阅读微博原文<el-icon><TopRight /></el-icon>
+          </el-button>
+          <small>摘要基于公开内容生成，请结合原文判断。</small>
+        </div>
+      </article>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import {
-  Search,
-  Refresh,
-  MagicStick,
-  Document,
-  Reading,
-  Delete,
-  TopRight,
-  ChatLineRound,
-  ArrowRight,
-  CircleCheck,
-  Warning,
-  InfoFilled,
-  Close,
-} from '@element-plus/icons-vue'
-import {
-  getWeiboHotSearchCache,
-  getMissingDescriptionStats,
-  fetchHotSearch,
-  fetchMissingDescriptions,
-  fetchStorySummary,
-  deleteHotSearch,
-  batchDeleteHotSearches,
-  type HotSearchCacheItem,
-} from '@/api/hotsearch'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import { ArrowRight, Back, Check, Close, Document, Loading, Plus, Refresh, Search, TopRight } from '@element-plus/icons-vue'
+import { fetchHotSearch, fetchStorySummary, getMissingDescriptionStats, getStoryDetail, getWeiboHotSearchCache, type HotSearchCacheItem } from '@/api/hotsearch'
 import { useSettingsStore } from '@/stores/settings'
+
+const route = useRoute()
 const router = useRouter()
 const settings = useSettingsStore()
+const pageSize = 12
 const items = ref<HotSearchCacheItem[]>([])
+const activeItem = ref<HotSearchCacheItem | null>(null)
+const articleHeading = ref<HTMLElement>()
 const total = ref(0)
 const page = ref(1)
-const pageSize = 15
-const activeHash = ref('')
 const search = ref('')
-const dateRange = ref<[string, string] | null>(null)
+const startDate = ref('')
+const endDate = ref('')
+const summaryStatus = ref<'all' | 'ready' | 'pending'>('all')
 const loading = ref(false)
+const detailLoading = ref(false)
 const collecting = ref(false)
-const generating = ref(false)
 const generatingHash = ref('')
-const singleError = ref<{ titleHash: string; message: string } | null>(null)
 const error = ref('')
-const collectLimit = ref(50)
-const summaryLimit = ref(3)
-const selectedTitles = ref(new Set<string>())
+const detailError = ref('')
+const singleError = ref('')
+const collectLimit = ref(10)
 const jobResult = ref<{ message: string; failed: boolean } | null>(null)
-const statistics = ref({
-  total_items: 0,
-  has_description_count: 0,
-  missing_count: 0,
+const statistics = ref({ total_items: 0, has_description_count: 0, missing_count: 0 })
+const isDetail = computed(() => route.name === 'hot-search-detail')
+const busy = computed(() => collecting.value || !!generatingHash.value)
+const pages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
+const dateError = computed(() => startDate.value && endDate.value && startDate.value > endDate.value ? '开始日期不能晚于结束日期。' : '')
+const hasFilters = computed(() => !!(search.value || startDate.value || endDate.value || summaryStatus.value !== 'all'))
+const sourceUrl = computed(() => {
+  try {
+    const url = new URL(activeItem.value?.url || '')
+    return ['https:', 'http:'].includes(url.protocol) ? url.href : ''
+  } catch { return '' }
 })
-const activeItem = computed(
-  () => items.value.find((item) => item.title_hash === activeHash.value) || items.value[0],
-)
-let requestSequence = 0
-const message = (value: unknown) => {
-  const detail = (value as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+let listRequest = 0
+let detailRequest = 0
+let routeRequest = 0
+let listScroll = 0
+let returnHash = ''
+let pollTimer: ReturnType<typeof setInterval> | undefined
+let polling = false
+const summaryLabel = (item: HotSearchCacheItem) => item.description ? '已有摘要' : ({queued: '排队中',processing: '生成中',retrying: '待重试',ready: '已有摘要'}[item.summary_status] || '排队中')
+
+const message = (failure: unknown) => {
+  const detail = (failure as { response?: { data?: { detail?: unknown } } })?.response?.data?.detail
   return typeof detail === 'string' ? detail : '服务暂时不可用，请稍后重试'
 }
-const cleanSummary = (text: string) => text.replace(/^(Agent总结|截断)[:：]\s*/, '')
-const shortDate = (value: string) =>
-  new Intl.DateTimeFormat('zh-CN', {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(value))
-const fullDate = (value: string) =>
-  new Intl.DateTimeFormat('zh-CN', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(value))
-const loadItems = async () => {
-  const sequence = ++requestSequence
-  loading.value = true
-  error.value = ''
+const cleanSummary = (value: string) => value.replace(/^(Agent总结|截断)[:：]\s*/, '')
+const formatDate = (value: string, full = false) => {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  return new Intl.DateTimeFormat('zh-CN', { year: full ? 'numeric' : undefined, month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(date)
+}
+const queryValue = (key: string) => typeof route.query[key] === 'string' ? route.query[key] as string : ''
+const readFilters = () => {
+  search.value = queryValue('search')
+  startDate.value = /^\d{4}-\d{2}-\d{2}$/.test(queryValue('start')) ? queryValue('start') : ''
+  endDate.value = /^\d{4}-\d{2}-\d{2}$/.test(queryValue('end')) ? queryValue('end') : ''
+  const status = queryValue('status')
+  summaryStatus.value = status === 'ready' || status === 'pending' ? status : 'all'
+  const requestedPage = Number(queryValue('page'))
+  page.value = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1
+}
+const listQuery = (targetPage = 1) => ({
+  search: search.value.trim() || undefined,
+  start: startDate.value || undefined,
+  end: endDate.value || undefined,
+  status: summaryStatus.value !== 'all' ? summaryStatus.value : undefined,
+  page: targetPage > 1 ? String(targetPage) : undefined,
+})
+const loadItems = async (silent = false) => {
+  const sequence = ++listRequest
+  if (!silent) { loading.value = true; error.value = '' }
+  if (dateError.value) { items.value = []; total.value = 0; loading.value = false; return }
   try {
-    const data = (
-      await getWeiboHotSearchCache({
-        limit: pageSize,
-        offset: (page.value - 1) * pageSize,
-        search: search.value.trim() || undefined,
-        start_date: dateRange.value?.[0] ? `${dateRange.value[0]}T00:00:00` : undefined,
-        end_date: dateRange.value?.[1] ? `${dateRange.value[1]}T23:59:59.999999` : undefined,
-      })
-    ).data
-    if (sequence !== requestSequence) return
+    const data = (await getWeiboHotSearchCache({ limit: pageSize, offset: (page.value - 1) * pageSize,
+      search: search.value.trim() || undefined, status: summaryStatus.value,
+      start_date: startDate.value ? `${startDate.value}T00:00:00` : undefined,
+      end_date: endDate.value ? `${endDate.value}T23:59:59.999999` : undefined,
+    })).data
+    if (sequence !== listRequest) return
     if (!data.items.length && data.total > 0 && page.value > 1) {
-      page.value = Math.max(1, Math.ceil(data.total / pageSize))
-      await loadItems()
+      await router.replace({ name: 'hot-search', query: listQuery(Math.ceil(data.total / pageSize)) })
       return
     }
     items.value = data.items
     total.value = data.total
-    selectedTitles.value = new Set()
   } catch (failure) {
-    if (sequence === requestSequence) error.value = message(failure)
+    if (sequence === listRequest && !silent) error.value = message(failure)
   } finally {
-    if (sequence === requestSequence) loading.value = false
+    if (sequence === listRequest) loading.value = false
   }
 }
 const refreshStatistics = async () => {
+  try { statistics.value = (await getMissingDescriptionStats()).data } catch { return }
+}
+const refresh = () => Promise.all([loadItems(), refreshStatistics()])
+const loadDetail = async (silent = false) => {
+  const sequence = ++detailRequest
+  const titleHash = String(route.params.titleHash)
+  if (!silent) {
+    detailLoading.value = true; detailError.value = ''; singleError.value = ''; activeItem.value = null
+  }
   try {
-    statistics.value = (await getMissingDescriptionStats()).data
-  } catch {
-    // 统计暂时不可用不影响已获取的资讯内容。
+    const item = (await getStoryDetail(titleHash)).data
+    if (sequence === detailRequest) activeItem.value = item
+  } catch (failure) {
+    if (sequence === detailRequest && !silent) detailError.value = message(failure)
+  } finally {
+    if (sequence === detailRequest) detailLoading.value = false
   }
 }
-const refresh = async () => {
-  await Promise.all([loadItems(), refreshStatistics()])
+const applyFilters = async () => {
+  clearTimeout(searchTimer)
+  const target = router.resolve({ name: 'hot-search', query: listQuery() })
+  if (route.fullPath === target.fullPath) await loadItems()
+  else await router.replace(target.fullPath)
 }
-const applyFilters = () => {
-  page.value = 1
-  loadItems()
-}
+const scheduleSearch = () => { clearTimeout(searchTimer); searchTimer = setTimeout(applyFilters, 300) }
 const resetFilters = () => {
-  search.value = ''
-  dateRange.value = null
-  applyFilters()
+  search.value = ''; startDate.value = ''; endDate.value = ''; summaryStatus.value = 'all'
+  return applyFilters()
 }
-const toggleSelection = (title: string) => {
-  const next = new Set(selectedTitles.value)
-  if (next.has(title)) next.delete(title)
-  else next.add(title)
-  selectedTitles.value = next
+const changePage = (targetPage: number) => {
+  clearTimeout(searchTimer)
+  return router.replace({ name: 'hot-search', query: listQuery(targetPage) })
 }
+const rememberList = (titleHash: string) => { listScroll = window.scrollY; returnHash = titleHash }
 const collect = async () => {
+  if (busy.value) return
   collecting.value = true
   jobResult.value = null
   try {
     const data = (await fetchHotSearch({ limit: collectLimit.value })).data
-    jobResult.value = {
-      message: `采集完成，新增 ${data.new_items} 条，已有 ${data.cached_items} 条。`,
-      failed: false,
+    jobResult.value = { message: `采集完成，新增 ${data.new_items} 条，已有 ${data.cached_items} 条。摘要已自动加入处理队列。`, failed: false }
+    if (!isDetail.value) {
+      if (page.value !== 1) await router.replace({ name: 'hot-search', query: listQuery() })
+      else await loadItems()
     }
-    page.value = 1
-    await refresh()
-  } catch (failure) {
-    jobResult.value = { message: message(failure), failed: true }
-  } finally {
-    collecting.value = false
-  }
-}
-const generateBatch = async () => {
-  if (generating.value || generatingHash.value) return
-  if (!settings.model) {
-    ElMessage.warning('请先在设置中添加并启用一个模型')
-    return
-  }
-  generating.value = true
-  jobResult.value = null
-  try {
-    const data = (await fetchMissingDescriptions({ limit: summaryLimit.value })).data
-    jobResult.value = {
-      message:
-        data.total_queued === 0
-          ? '所有资讯都已有摘要，无需重复生成。'
-          : `摘要生成完成：成功 ${data.success_count} 条${data.failed_count ? `，失败 ${data.failed_count} 条。${data.items.find((item) => item.error)?.error || ''}` : '。'}`,
-      failed: data.failed_count > 0,
-    }
-    page.value = 1
-    await refresh()
-  } catch (failure) {
-    jobResult.value = { message: message(failure), failed: true }
-  } finally {
-    generating.value = false
-  }
+    await refreshStatistics()
+  } catch (failure) { jobResult.value = { message: message(failure), failed: true } }
+  finally { collecting.value = false }
 }
 const generateCurrent = async () => {
   const target = activeItem.value
-  if (!target || generating.value || generatingHash.value) return
-  if (!settings.model) {
-    ElMessage.warning('请先在设置中添加并启用一个模型')
-    return
-  }
+  if (!target || busy.value) return
+  if (!settings.model) { ElMessage.warning('请先在设置中添加并启用一个模型'); return }
   generatingHash.value = target.title_hash
-  singleError.value = null
+  singleError.value = ''
   try {
     const data = (await fetchStorySummary(target.title_hash)).data
-    items.value = items.value.map((item) =>
-      item.title_hash === data.item.title_hash ? data.item : item,
-    )
+    if (isDetail.value && route.params.titleHash === target.title_hash) activeItem.value = data.item
     await refreshStatistics()
-    ElMessage.success('本条资讯详情已更新')
+    ElMessage.success(data.status === 'cached' ? '本条摘要已就绪' : '已重新加入摘要队列')
   } catch (failure) {
-    singleError.value = { titleHash: target.title_hash, message: message(failure) }
-  } finally {
-    generatingHash.value = ''
-  }
+    if (isDetail.value && route.params.titleHash === target.title_hash) singleError.value = message(failure)
+  } finally { generatingHash.value = '' }
 }
-const removeOne = async (title: string) => {
-  try {
-    await ElMessageBox.confirm(`确定删除「${title}」？`, '删除资讯', {
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
-      type: 'warning',
-    })
-  } catch {
-    return
+
+watch(() => route.fullPath, async (_, previousPath) => {
+  const sequence = ++routeRequest
+  const returning = !!previousPath?.startsWith('/news/') && !isDetail.value
+  clearTimeout(searchTimer)
+  if (isDetail.value) {
+    ++listRequest
+    loading.value = false
+    await loadDetail()
+  } else {
+    ++detailRequest
+    readFilters()
+    await loadItems()
   }
-  try {
-    await deleteHotSearch(title)
-    await refresh()
-    ElMessage.success('资讯已删除')
-  } catch (failure) {
-    ElMessage.error(message(failure))
-  }
-}
-const removeSelected = async () => {
-  try {
-    await ElMessageBox.confirm(`确定删除选中的 ${selectedTitles.value.size} 条资讯？`, '删除资讯', {
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
-      type: 'warning',
-    })
-  } catch {
-    return
-  }
-  try {
-    await batchDeleteHotSearches([...selectedTitles.value])
-    await refresh()
-    ElMessage.success('所选资讯已删除')
-  } catch (failure) {
-    ElMessage.error(message(failure))
-  }
-}
-const discuss = (title: string) => router.push({ path: '/chat', query: { topic: title } })
-onMounted(refresh)
+  if (sequence !== routeRequest) return
+  await nextTick()
+  window.scrollTo(0, returning ? listScroll : 0)
+  if (isDetail.value) articleHeading.value?.focus({ preventScroll: true })
+  else if (returning && returnHash) document.getElementById(`story-${returnHash}`)?.focus({ preventScroll: true })
+}, { immediate: true })
+onMounted(() => {
+  refreshStatistics()
+  pollTimer = setInterval(async () => {
+    if (polling || loading.value || detailLoading.value || busy.value || document.hidden) return
+    polling = true
+    try {
+      if (isDetail.value) { if (activeItem.value && !activeItem.value.description) await loadDetail(true) }
+      else if (statistics.value.missing_count && search.value.trim() === queryValue('search')) await loadItems(true)
+      await refreshStatistics()
+    } finally { polling = false }
+  },5000)
+})
+onBeforeUnmount(() => { clearTimeout(searchTimer); clearInterval(pollTimer); ++listRequest; ++detailRequest; ++routeRequest })
 </script>
 
 <style scoped>
-.news-page {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-  gap: 16px;
-}
-.collection-bar {
-  padding: 17px 20px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 18px;
-  flex-shrink: 0;
-}
-.collection-metrics {
-  display: flex;
-  align-items: center;
-  gap: 17px;
-  font-size: 10px;
-  color: #8a9ca6;
-  white-space: nowrap;
-}
-.collection-metrics strong {
-  font-size: 19px;
-  font-weight: 600;
-  color: #486473;
-  margin-right: 5px;
-  font-variant-numeric: tabular-nums;
-}
-.collection-metrics i {
-  height: 23px;
-  width: 1px;
-  background: var(--line);
-}
-.pending-count {
-  color: #a0acb3;
-  font-size: 9px;
-}
-.collection-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: center;
-}
-.button-count {
-  border-left: 1px solid #e4eaed;
-  padding-left: 10px;
-  margin-left: 10px;
-  font-size: 10px;
-  color: #8f9da6;
-}
-.generate-control {
-  display: flex;
-  align-items: center;
-}
-.generate-control .el-button {
-  margin-left: 5px;
-}
-.generate-control :deep(.el-select__wrapper) {
-  box-shadow: none;
-  background: #f6f8f9;
-  font-size: 10px;
-}
-.connection-banner {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 11px;
-  color: #ab8968;
-  background: #fdf7ed;
-  padding: 13px 16px;
-  border-radius: 8px;
-  flex-shrink: 0;
-}
-.connection-banner a {
-  margin-left: auto;
-  color: #8d775e;
-  white-space: nowrap;
-}
-.job-result {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #4d8b70;
-  background: #eaf5ee;
-  border: 1px solid #dcece1;
-  padding: 8px 14px;
-  border-radius: 8px;
-  flex-shrink: 0;
-  font-size: 11px;
-}
-.job-result.failed {
-  color: #ad805c;
-  background: #fff4e9;
-  border-color: #f2e6d9;
-}
-.job-result .icon-button {
-  margin-left: auto;
-}
-.news-workspace {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
-}
-.news-toolbar {
-  display: flex;
-  flex-shrink: 0;
-  justify-content: space-between;
-  align-items: center;
-  gap: 20px;
-  padding: 20px 22px;
-  border-bottom: 1px solid var(--line);
-}
-.feed-title {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  font-size: 13px;
-  font-weight: 600;
-  flex-shrink: 0;
-}
-.feed-marker {
-  width: 3px;
-  height: 12px;
-  background: #57998c;
-  border-radius: 2px;
-}
-.result-count {
-  padding: 3px 6px;
-  font-size: 9px;
-  font-weight: 500;
-  border-radius: 4px;
-  background: #f0f4f5;
-  color: #94a1a9;
-  margin-left: 2px;
-}
-.feed-filters {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  min-width: 0;
-}
-.feed-filters > .el-input {
-  max-width: 180px;
-}
-.feed-filters :deep(.el-date-editor) {
-  width: 220px;
-  flex-grow: 0;
-}
-.feed-filters :deep(.el-input__wrapper),
-.feed-filters :deep(.el-range-editor) {
-  box-shadow: 0 0 0 1px #e9eef0 inset;
-  font-size: 10px;
-}
-.feed-filters :deep(.el-range-input) {
-  font-size: 10px;
-}
-.news-columns {
-  display: grid;
-  flex: 1;
-  grid-template-columns: minmax(270px, 0.95fr) minmax(280px, 1.05fr);
-  grid-template-rows: minmax(0, 1fr);
-  min-height: 0;
-}
-.feed-column {
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  border-right: 1px solid var(--line);
-  display: flex;
-  flex-direction: column;
-}
-.feed-column-label {
-  flex-shrink: 0;
-  padding: 16px 23px;
-  display: flex;
-  justify-content: space-between;
-  color: #a0adb5;
-  font-size: 9px;
-}
-.feed-list {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior-y: contain;
-  scrollbar-gutter: stable;
-}
-.feed-row {
-  display: flex;
-  gap: 10px;
-  padding: 17px 18px 17px 23px;
-  border-bottom: 1px solid #f0f3f4;
-  position: relative;
-  min-height: 116px;
-}
-.feed-row.active {
-  background: #f0f7f4;
-}
-.feed-row.active::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  background: #5b9c89;
-}
-.feed-row:hover {
-  background: #f5f9f7;
-}
-.feed-row > .el-checkbox {
-  align-self: center;
-  margin: 0;
-}
-.feed-row :deep(.el-checkbox__inner) {
-  width: 12px;
-  height: 12px;
-  border-color: #dbe3e6;
-}
-.feed-row :deep(.el-checkbox__inner::after) {
-  left: 3px;
-  top: 0;
-}
-.feed-story {
-  text-align: left;
-  border: 0;
-  background: none;
-  min-width: 0;
-  flex: 1;
-  color: var(--ink);
-}
-.story-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 8px;
-  color: #9cabb2;
-}
-.story-number {
-  font:
-    9px Menlo,
-    monospace;
-  color: #a0afb6;
-}
-.summary-ready {
-  color: #70a38c;
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  white-space: nowrap;
-}
-.summary-ready i {
-  width: 4px;
-  height: 4px;
-  background: #70a38c;
-  border-radius: 50%;
-}
-.feed-story h2 {
-  font-size: 12px;
-  font-weight: 550;
-  line-height: 1.8;
-  margin: 7px 0 5px;
-}
-.feed-story p {
-  color: #a0acb3;
-  font-size: 10px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  line-height: 1.8;
-}
-.feed-story .awaiting-summary {
-  color: #b0bbc1;
-  font-size: 9px;
-}
-.story-arrow {
-  color: #6b9c8d;
-  align-self: center;
-  margin-left: 1px;
-}
-.feed-pagination {
-  flex-shrink: 0;
-  padding: 15px 18px 15px 23px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  border-top: 1px solid var(--line);
-  margin-top: auto;
-}
-.feed-pagination > span {
-  color: #9ba8b0;
-  font-size: 9px;
-}
-.feed-pagination :deep(.el-pager li) {
-  min-width: 23px;
-  height: 25px;
-  font-size: 10px;
-}
-.feed-pagination :deep(button) {
-  min-width: 22px;
-  height: 25px;
-}
-.reader-column {
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-}
-.reader-kicker {
-  flex-shrink: 0;
-  padding: 15px 25px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 10px;
-  color: #9aabb3;
-  border-bottom: 1px solid #f0f3f4;
-  min-height: 57px;
-}
-.reader-kicker > span {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.reader-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior-y: contain;
-  scrollbar-gutter: stable;
-  padding: 36px 33px 28px;
-}
-.feed-list:focus-visible,
-.reader-body:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: -2px;
-}
-.reader-meta {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  font-size: 9px;
-  color: #a0adb5;
-  line-height: 1.8;
-}
-.reader-meta i {
-  width: 2px;
-  height: 2px;
-  border-radius: 50%;
-  background: #bbc5ca;
-  margin: 0 2px;
-}
-.weibo-symbol {
-  color: #d48b63;
-  background: #fff3e8;
-  border-radius: 4px;
-  font-size: 8px;
-  padding: 0 4px;
-}
-.reader-body > h2 {
-  font-size: 24px;
-  line-height: 1.65;
-  letter-spacing: -0.5px;
-  font-weight: 600;
-  margin-top: 21px;
-}
-.reader-rule {
-  display: block;
-  width: 28px;
-  height: 2px;
-  background: #8db5a5;
-  margin: 25px 0 30px;
-}
-.summary-label {
-  display: flex;
-  gap: 7px;
-  align-items: center;
-  color: #75a18f;
-  font-size: 9px;
-}
-.reader-summary > p {
-  font-size: 12px;
-  color: #74858d;
-  line-height: 2.5;
-  margin-top: 17px;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.summary-footnote {
-  margin-top: 25px;
-  border-left: 2px solid #e0eae5;
-  padding: 3px 0 3px 10px;
-  color: #b0bac0;
-  font-size: 9px;
-  line-height: 1.9;
-}
-.reader-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 33px;
-}
-.reader-actions .el-button {
-  margin: 0;
-  height: 33px;
-  font-size: 10px;
-}
-.reader-actions .el-icon {
-  margin-left: 12px;
-}
-.reader-bottom {
-  flex-shrink: 0;
-  margin: auto 25px 0;
-  border-top: 1px solid #f0f3f4;
-  padding: 19px 0;
-  display: flex;
-  gap: 7px;
-  align-items: center;
-  color: #a3b4b5;
-  font-size: 8px;
-  letter-spacing: 1px;
-}
-.reader-bottom .status-dot {
-  width: 4px;
-  height: 4px;
-}
-.reader-bottom > span:last-child {
-  margin-left: auto;
-  color: #b6c1c6;
-  letter-spacing: 0.2px;
-}
-.reader-placeholder {
-  align-items: center;
-  justify-content: center;
-  color: #b7c7c7;
-  text-align: center;
-  padding: 25px;
-}
-.reader-placeholder h2 {
-  font-size: 17px;
-  margin: 23px 0 12px;
-  color: #8ca2a4;
-  font-weight: 400;
-}
-.reader-placeholder p {
-  color: #a8b6bc;
-  font-size: 11px;
-}
-.reader-empty {
-  padding: 12px 0 30px;
-}
-.reader-empty-icon {
-  display: grid;
-  place-items: center;
-  width: 45px;
-  height: 45px;
-  background: #f0f6f2;
-  color: #93b4a5;
-  border-radius: 12px;
-  font-size: 21px;
-}
-.reader-empty h3 {
-  font-size: 14px;
-  font-weight: 500;
-  color: #75918a;
-  margin-top: 20px;
-}
-.reader-empty p {
-  margin: 12px 0 22px;
-  line-height: 2;
-  font-size: 10px;
-  color: #9cacb2;
-}
-.reader-empty .single-summary-error {
-  color: #ad805c;
-}
-.reader-empty .el-button {
-  font-size: 10px;
-}
-.reader-empty .el-icon {
-  margin-left: 8px;
-}
-.page-footnote {
-  display: flex;
-  flex-shrink: 0;
-  justify-content: space-between;
-  gap: 12px;
-  color: #abb7bf;
-  font-size: 9px;
-  padding: 0 2px;
-}
-.selection-bar {
-  flex-shrink: 0;
-  padding: 9px 22px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  border-bottom: 1px solid var(--line);
-  font-size: 10px;
-  color: #6f9b88;
-  background: #f8fbf9;
-}
-.selection-bar > button:not(.el-button) {
-  border: none;
-  background: none;
-  font-size: 10px;
-  color: #91a1a9;
-}
-.selection-bar .el-button {
-  margin-left: auto;
-}
-@media (max-width: 1200px) {
-  .collection-bar {
-    flex-wrap: wrap;
-  }
-  .collection-actions {
-    margin-left: auto;
-  }
-  .news-toolbar {
-    flex-wrap: wrap;
-    gap: 15px;
-  }
-  .feed-filters {
-    width: 100%;
-  }
-  .feed-filters > .el-input {
-    max-width: none;
-  }
-  .feed-filters :deep(.el-date-editor) {
-    width: 230px;
-  }
-  .reader-body {
-    padding: 30px 24px;
-  }
-  .reader-body > h2 {
-    font-size: 21px;
-  }
-  .summary-ready {
-    font-size: 8px;
-  }
-  .feed-row {
-    padding-left: 17px;
-    gap: 8px;
-  }
-  .news-columns {
-    grid-template-columns: minmax(240px, 0.95fr) minmax(260px, 1.05fr);
-  }
-  .pending-count {
-    display: none;
-  }
-}
-@media (max-width: 940px) {
-  .news-columns {
-    flex: none;
-    grid-template-columns: 1fr;
-    grid-template-rows: auto auto;
-  }
-  .feed-column {
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-  }
-  .feed-list {
-    flex: none;
-    height: min(52dvh, 480px);
-  }
-  .reader-body {
-    flex: none;
-    max-height: min(65dvh, 620px);
-    padding: 26px;
-  }
-  .reader-column {
-    min-height: 0;
-  }
-  .reader-placeholder {
-    min-height: 280px;
-  }
-  .reader-body > h2 {
-    font-size: 23px;
-  }
-  .reader-summary > p {
-    font-size: 13px;
-  }
-  .collection-metrics {
-    gap: 12px;
-  }
-  .collection-actions {
-    width: 100%;
-    justify-content: space-between;
-    margin-top: 3px;
-  }
-  .feed-filters {
-    flex-wrap: wrap;
-  }
-  .feed-filters :deep(.el-date-editor) {
-    width: 210px;
-  }
-  .feed-filters > .el-input {
-    width: 100%;
-    flex: none;
-  }
-}
-@media (max-width: 480px) {
-  .collection-bar {
-    padding: 15px;
-  }
-  .collection-metrics strong {
-    font-size: 17px;
-  }
-  .collection-metrics {
-    font-size: 9px;
-  }
-  .collection-actions {
-    gap: 8px;
-  }
-  .collection-actions :deep(.el-button) {
-    padding: 8px 10px;
-    font-size: 10px;
-  }
-  .button-count {
-    padding-left: 7px;
-    margin-left: 7px;
-  }
-  .generate-control :deep(.el-select) {
-    width: 62px !important;
-  }
-  .news-toolbar {
-    padding: 17px 15px;
-  }
-  .feed-filters :deep(.el-date-editor) {
-    width: 100%;
-  }
-  .feed-filters > .el-button {
-    width: 100%;
-  }
-  .reader-body {
-    padding: 24px 20px;
-  }
-  .reader-body > h2 {
-    font-size: 21px;
-  }
-  .page-footnote {
-    flex-direction: column;
-    gap: 7px;
-  }
-  .reader-bottom > span:last-child {
-    display: none;
-  }
-}
-</style>
-
-<style scoped>
-.feed-story h2 {
-  font-size: 13px;
-}
-.feed-story p {
-  font-size: 11px;
-  color: #8a9ca5;
-}
-.reader-summary > p {
-  font-size: 13px;
-  color: #647c85;
-  line-height: 2.35;
-}
-.reader-meta {
-  font-size: 10px;
-}
-.feed-column-label {
-  font-size: 10px;
+.news-page { min-width: 0; }
+.news-heading { display: flex; align-items: center; justify-content: space-between; gap: 22px; margin-bottom: 27px; }
+.news-heading h1 { font-size: 26px; font-weight: 650; letter-spacing: -.6px; }
+.news-metrics { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; margin-top: 7px; }
+.news-metrics i { width: 2px; height: 2px; background: #bfc5ce; border-radius: 50%; }
+.news-actions { display: flex; align-items: center; gap: 11px; }
+.action-group { display: flex; align-items: center; }
+.action-group select { height: 35px; min-width: 65px; padding: 0 7px 0 10px; border: 1px solid var(--line); border-right: 0; border-radius: 5px 0 0 5px; background: white; font-size: 12px; }
+.action-group .el-button { border-radius: 0 5px 5px 0; }
+.news-actions > .el-button { margin: 0; }
+.news-page :deep(.el-button) { min-height: 35px; }
+.connection-notice,.job-result { display: flex; align-items: center; gap: 12px; padding: 10px 13px; border: 1px solid var(--line); border-radius: 5px; font-size: 12px; margin-bottom: 16px; background: white; color: var(--muted); }
+.connection-notice a { color: var(--accent); white-space: nowrap; }
+.job-result { color: #347451; }
+.job-result.failed { color: #a33c32; }
+.job-result .icon-button { margin-left: auto; }
+.news-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 11px; margin-bottom: 17px; }
+.news-search { display: flex; align-items: center; gap: 8px; width: 290px; height: 36px; padding: 0 11px; border: 1px solid var(--line); border-radius: 5px; background: white; color: var(--muted); }
+.news-search input { width: 100%; min-width: 0; padding: 0; border: 0; outline: none; background: none; color: var(--ink); font-size: 12px; }
+.news-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.date-range { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 5px; background: white; color: var(--muted); }
+.date-range input { width: 109px; min-height: 28px; border: 0; background: none; color: var(--ink); font-size: 11px; }
+.date-range span { color: #9aa1ab; font-size: 11px; }
+.status-filter { height: 36px; padding: 0 10px; background: white; border: 1px solid var(--line); border-radius: 5px; font-size: 12px; }
+.sort-note { margin-left: auto; color: var(--muted); font-size: 11px; }
+.text-button { display: inline-flex; align-items: center; gap: 7px; border: 0; background: none; color: var(--muted); font-size: 12px; }
+.text-button:hover { color: var(--accent); }
+.filter-error { color: #a33c32; font-size: 12px; margin-bottom: 12px; }
+.news-results { min-height: 100px; }
+.news-table { border: 1px solid var(--line); border-radius: 6px; background: white; overflow: hidden; }
+.news-table-head,.news-row { display: grid; grid-template-columns: 45px minmax(0,1fr) 105px 128px 17px; gap: 16px; align-items: center; padding: 0 20px; }
+.news-table-head { min-height: 37px; background: #fafbfc; border-bottom: 1px solid var(--line); font-size: 11px; color: var(--muted); }
+.news-row { min-height: 55px; border-bottom: 1px solid #eef0f3; }
+.news-row:last-child { border: 0; }
+.news-row:hover { background: #f8faff; }
+.news-row h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 550; line-height: 1.7; }
+.news-row:hover h2 { color: var(--accent); }
+.row-number,.row-time,.page-number { font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace; font-variant-numeric: tabular-nums; }
+.row-number { font-size: 11px; color: #808995; }
+.row-time { font-size: 11px; color: var(--muted); }
+.summary-state { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: #818995; white-space: nowrap; }
+.summary-state.ready { color: #347451; }
+.summary-state.retrying { color: #a56c32; }
+.summary-state .el-icon { font-size: 12px; }
+.row-arrow { color: #a3abb7; font-size: 12px; }
+.news-pagination { display: flex; justify-content: space-between; align-items: center; gap: 15px; margin-top: 18px; color: var(--muted); font-size: 11px; }
+.news-pagination > div { display: flex; align-items: center; gap: 10px; }
+.news-pagination :deep(.el-button) { min-height: 29px; height: 29px; padding: 4px 8px; font-size: 11px; margin: 0; }
+.news-empty { padding: 65px 20px; text-align: center; border: 1px solid var(--line); border-radius: 6px; background: white; }
+.news-empty h2 { font-size: 17px; font-weight: 550; }
+.news-empty p { margin: 9px 0 20px; font-size: 12px; color: var(--muted); line-height: 1.8; }
+.news-footnote { margin-top: 24px; color: #78818c; font-size: 10px; }
+.news-reader { max-width: 820px; margin: 0 auto; }
+.reader-back { margin-bottom: 23px; }
+.reader-sheet { min-height: 200px; padding: 36px 39px; border: 1px solid var(--line); border-radius: 6px; background: white; }
+.reader-sheet .news-empty { border: 0; }
+.reader-source { color: var(--muted); font-size: 11px; margin-bottom: 13px; }
+.reader-sheet h1 { font-size: 29px; line-height: 1.55; letter-spacing: -.5px; font-weight: 650; }
+.reader-meta { display: flex; align-items: center; gap: 19px; margin-top: 17px; padding-bottom: 23px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+.article-label { margin: 25px 0 16px; font-size: 12px; font-weight: 600; }
+.article-copy { white-space: pre-wrap; overflow-wrap: anywhere; color: #3d4650; font-size: 16px; line-height: 2; }
+.reader-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid var(--line); padding-top: 20px; margin-top: 28px; }
+.reader-actions .el-icon { margin-left: 7px; }
+.reader-actions small { color: #7b8390; font-size: 10px; }
+.pending-summary { text-align: center; padding: 45px 15px; }
+.pending-summary > .el-icon { color: #8993a2; font-size: 27px; margin-bottom: 14px; }
+.pending-summary h2 { font-size: 16px; font-weight: 550; }
+.pending-summary p { font-size: 12px; color: var(--muted); margin: 8px 0 20px; }
+.pending-summary .single-error { color: #a33c32; margin: 17px 0 0; }
+@media (max-width: 1000px) {
+  .news-heading { flex-wrap: wrap; align-items: flex-start; gap: 18px; }
+  .sort-note { display: none; }
+  .news-search { width: 260px; }
+  .news-table-head,.news-row { grid-template-columns: 33px minmax(0,1fr) 95px 115px 14px; gap: 13px; padding: 0 16px; }
+}
+@media (max-width: 640px) {
+  .news-heading { margin-bottom: 22px; }
+  .news-heading h1 { font-size: 24px; }
+  .news-metrics { font-size: 11px; gap: 7px; }
+  .news-actions { width: 100%; gap: 8px; flex-wrap: wrap; }
+  .news-actions :deep(.el-button) { font-size: 11px; padding: 7px 9px; }
+  .action-group select { min-width: 58px; padding-left: 8px; font-size: 11px; }
+  .refresh-button span { display: none; }
+  .news-actions > .refresh-button { margin-left: auto; }
+  .news-filters { gap: 9px; margin-bottom: 14px; }
+  .news-search { width: 100%; height: 37px; }
+  .date-range { gap: 5px; padding: 0 8px; flex: 1; }
+  .date-range input { width: 98px; font-size: 10px; }
+  .status-filter { padding: 0 6px; max-width: 110px; font-size: 11px; }
+  .news-table-head,.news-row { grid-template-columns: 22px minmax(0,1fr) 71px 11px; gap: 8px; padding: 0 11px; }
+  .time-column { display: none; }
+  .news-table-head { min-height: 34px; font-size: 10px; }
+  .news-row { min-height: 66px; padding-top: 10px; padding-bottom: 10px; }
+  .news-row h2 { font-size: 13px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.65; }
+  .row-number,.summary-state { font-size: 10px; }
+  .summary-state { gap: 4px; }
+  .summary-state .el-icon { font-size: 10px; }
+  .row-arrow { font-size: 11px; }
+  .reader-back { margin-bottom: 19px; }
+  .reader-sheet { padding: 25px 20px; }
+  .reader-sheet h1 { font-size: 24px; }
+  .reader-meta { flex-wrap: wrap; gap: 12px; padding-bottom: 20px; font-size: 10px; }
+  .article-copy { font-size: 15px; }
+  .reader-actions { flex-direction: column; align-items: flex-start; gap: 12px; }
+}
+@media (max-width: 360px) {
+  .news-actions { gap: 6px; }
+  .news-actions :deep(.el-button) { padding: 7px; font-size: 10px; }
+  .action-group select { min-width: 49px; padding-left: 4px; font-size: 10px; }
+  .date-range { width: 100%; flex: none; justify-content: space-between; }
+  .date-range input { width: 43%; }
 }
 </style>

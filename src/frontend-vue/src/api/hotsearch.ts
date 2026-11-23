@@ -5,11 +5,13 @@ export interface HotSearchCacheItem {
   title_hash: string
   url?: string
   title: string
-  description: string
-  description_source: string
+  description: string | null
+  description_source: string | null
   created_at: string
   updated_at: string
   expires_at: string
+  summary_status: 'ready' | 'queued' | 'processing' | 'retrying'
+  summary_error?: string | null
 }
 
 /** 热搜缓存响应 */
@@ -45,13 +47,10 @@ export interface TaskResult {
 export interface FetchMissingResponse {
   message: string
   total_queued: number
-  success_count: number
-  failed_count: number
-  items: TaskResult[]
 }
 
 export interface SingleSummaryResponse {
-  status: 'generated' | 'cached'
+  status: 'queued' | 'cached'
   item: HotSearchCacheItem
 }
 
@@ -82,6 +81,7 @@ export interface FetchHotSearchResponse {
   total_fetched: number
   new_items: number
   cached_items: number
+  description_tasks_queued: number
   items: HotSearchFetchItem[]
 }
 
@@ -92,8 +92,13 @@ export const getWeiboHotSearchCache = (params: {
   search?: string
   start_date?: string
   end_date?: string
+  status?: 'all' | 'ready' | 'pending'
 }) => {
   return request.get<HotSearchCacheResponse>('/weibo/cache', { params })
+}
+
+export const getStoryDetail = (titleHash: string) => {
+  return request.get<HotSearchCacheItem>(`/weibo/cache/${encodeURIComponent(titleHash)}`)
 }
 
 /** 获取缺失描述的统计信息 */
@@ -124,20 +129,16 @@ export const getHasDescriptionItems = (params?: { limit?: number }) => {
 
 /** 手动触发抓取缺失描述的任务 */
 export const fetchMissingDescriptions = (params: { limit?: number }) => {
-  // 为批量抓取描述设置更长的超时时间（5分钟）
-  // 因为需要处理多个热搜，每个都需要 Selenium + LLM 生成
   return request.post<FetchMissingResponse>('/weibo/cache/fetch-missing', null, {
     params,
-    timeout: 300000, // 5分钟超时
   })
 }
 
-/** 只获取指定资讯的微博内容并生成摘要。 */
+/** 将指定资讯加入摘要队列。 */
 export const fetchStorySummary = (titleHash: string) => {
   return request.post<SingleSummaryResponse>(
     `/weibo/cache/${encodeURIComponent(titleHash)}/summary`,
     null,
-    { timeout: 180000 },
   )
 }
 

@@ -10,7 +10,12 @@ const router = createRouter({
       component: () => import('@/components/AppShell.vue'),
       meta: { requiresAuth: true },
       children: [
-        { path: '', component: () => import('@/views/HotSearchView.vue') },
+        { path: '', name: 'hot-search', component: () => import('@/views/HotSearchView.vue') },
+        {
+          path: 'news/:titleHash',
+          name: 'hot-search-detail',
+          component: () => import('@/views/HotSearchView.vue'),
+        },
         { path: 'chat', component: () => import('@/views/ChatView.vue') },
         {
           path: 'settings',
@@ -22,6 +27,11 @@ const router = createRouter({
     { path: '/weibo-login', redirect: '/settings?tab=weibo' },
     { path: '/:pathMatch(.*)*', redirect: '/' },
   ],
+  scrollBehavior(to, from, savedPosition) {
+    if (to.name === 'hot-search' || to.name === 'hot-search-detail') return false
+    if (to.path === from.path) return false
+    return savedPosition || { top: 0 }
+  },
 })
 router.beforeEach((to) => {
   const auth = useAuthStore()

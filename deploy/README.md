@@ -12,23 +12,27 @@
 2. **news-agent-celery-worker** - Celery Worker（执行异步任务）
 3. **news-agent-celery-beat** - Celery Beat（定时任务调度器）
 
+标题采集与摘要生成分开执行。标题和摘要任务一起写入数据库后立即返回；后台每次处理一条摘要，失败自动延后重试，重启后恢复队列。请配置 `WEIBO_SUMMARY_USERNAME` 为有启用模型的账号，并保证 worker 与 beat 均运行。worker 至少使用两个执行槽位，以便生成摘要时仍可执行标题采集；现有 service 的并发配置为 4，摘要本身由数据库锁保证串行。
+
 ## 定时任务
 
 已配置的定时任务：
 
 - **每 3 小时整点**：抓取微博热搜标题并保存到数据库
+- **每 5 秒**：检查持久化摘要队列，逐条处理待生成资讯
 - **每10分钟**：清理过期的微博热搜缓存
 
 ## 部署步骤
 
 ### 1. 确保环境变量配置正确
 
-在 `.env` 文件中添加 Redis 配置：
+在 `.env` 文件中添加 Redis 配置和自动摘要账号：
 
 ```bash
 # Redis 配置（用于 Celery）
 REDIS_HOST=127.0.0.1
 REDIS_PORT=6379
+WEIBO_SUMMARY_USERNAME=你的模型账号
 ```
 
 ### 2. 确保 Redis 已安装并运行

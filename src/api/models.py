@@ -43,15 +43,17 @@ class HotSearchSummaryItem(BaseModel):
     title_hash: str
     title: str
     url: str | None
-    description: str
+    description: str | None
     description_source: str | None
     created_at: datetime
     updated_at: datetime
     expires_at: datetime
+    summary_status: Literal["ready", "queued", "processing", "retrying"] = "queued"
+    summary_error: str | None = None
 
 
 class SingleSummaryResponse(BaseModel):
-    status: Literal["generated", "cached"]
+    status: Literal["queued", "cached"]
     item: HotSearchSummaryItem
 
 

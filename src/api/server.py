@@ -1,16 +1,16 @@
 """FastAPI server for news agent"""
 
-from fastapi import FastAPI, HTTPException, Depends, Body
+from fastapi import FastAPI, HTTPException, Depends, Body, Query, Response
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import List
+from typing import List, Literal
 import os
 import json
 import logging
 
-from .models import ChatRequest, ChatResponse, HealthResponse, SingleSummaryResponse
+from .models import ChatRequest, ChatResponse, HealthResponse, HotSearchSummaryItem, SingleSummaryResponse
 from ..agent.base import NewsAgent
 from ..agent.config import get_settings
 from ..tools import fetch_weibo_hot_search
@@ -21,6 +21,7 @@ from ..tools.weibo_cache import WeiboHotSearchCache
 from . import weibo_login
 from ..settings.router import router as settings_router
 from ..settings.service import ModelSettingsService
+from ..tasks import summary_queue
 
 # 配置日志
 logging.basicConfig(
@@ -39,6 +40,8 @@ async def lifespan(app: FastAPI):
         await db.connect()
         async with db.pool.acquire() as conn:
             await ModelSettingsService.ensure_schema(conn)
+            await summary_queue.ensure_schema(conn)
+            await summary_queue.enqueue_missing(conn)
     except Exception as e:
         print(f"✗ Failed to connect to database: {e}")
         raise
@@ -248,11 +251,12 @@ async def get_conversation_messages(
 
 @app.get("/api/weibo/cache")
 async def get_weibo_cache(
-    limit: int = 15,
-    offset: int = 0,
+    limit: int = Query(default=15, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
     search: str = None,
-    start_date: str = None,
-    end_date: str = None,
+    start_date: datetime | None = None,
+    end_date: datetime | None = None,
+    status: Literal["all", "ready", "pending"] = "all",
     current_user: User = Depends(get_current_user)
 ):
     """
@@ -266,11 +270,16 @@ async def get_weibo_cache(
         end_date: End date for filtering updated_at (ISO format, optional)
         current_user: Authenticated user
     """
-    cache = WeiboHotSearchCache(pool=db.pool)
+    if start_date and end_date:
+        try:
+            invalid_range = start_date > end_date
+        except TypeError:
+            raise HTTPException(422, detail="日期范围必须使用一致的时区") from None
+        if invalid_range:
+            raise HTTPException(422, detail="开始日期不能晚于结束日期")
 
     async with db.pool.acquire() as conn:
-        # Build WHERE conditions
-        conditions = []
+        conditions = ["expires_at > NOW()"]
         params = []
         param_count = 0
 
@@ -281,27 +290,31 @@ async def get_weibo_cache(
 
         if start_date:
             param_count += 1
-            # Parse ISO format string to datetime object
-            start_dt = datetime.fromisoformat(start_date)
             conditions.append(f"updated_at >= ${param_count}")
-            params.append(start_dt)
+            params.append(start_date)
 
         if end_date:
             param_count += 1
-            # Parse ISO format string to datetime object
-            end_dt = datetime.fromisoformat(end_date)
             conditions.append(f"updated_at <= ${param_count}")
-            params.append(end_dt)
+            params.append(end_date)
+
+        if status == "ready":
+            conditions.append("description IS NOT NULL AND description != ''")
+        elif status == "pending":
+            conditions.append("(description IS NULL OR description = '')")
 
         where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
         # Get entries with filters
         query = f"""
             SELECT title_hash, title, url, description, description_source,
-                   created_at, updated_at, expires_at
+                   created_at, updated_at, expires_at,
+                   {summary_queue.SUMMARY_STATUS_SQL} AS summary_status,
+                   summary_job.last_error AS summary_error
             FROM weibo_hot_search_cache
+            LEFT JOIN weibo_summary_jobs summary_job USING(title_hash)
             {where_clause}
-            ORDER BY updated_at DESC
+            ORDER BY updated_at DESC, title_hash ASC
             LIMIT ${param_count + 1} OFFSET ${param_count + 2}
         """
         rows = await conn.fetch(query, *params, limit, offset)
@@ -321,6 +334,8 @@ async def get_weibo_cache(
                     "created_at": row["created_at"].isoformat() if row["created_at"] else None,
                     "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
                     "expires_at": row["expires_at"].isoformat() if row["expires_at"] else None,
+                    "summary_status": row["summary_status"],
+                    "summary_error": row["summary_error"],
                 }
                 for row in rows
             ],
@@ -494,89 +509,48 @@ async def get_has_description_items(
         }
 
 
-@app.post("/api/weibo/cache/{title_hash}/summary", response_model=SingleSummaryResponse)
-async def fetch_story_summary(title_hash: str, current_user: User = Depends(get_current_user)):
-    """只抓取指定资讯的链接，并使用发起用户启用的模型生成摘要。"""
-    from ..tasks.weibo_tasks import _fetch_and_update_description_async
+@app.get("/api/weibo/cache/{title_hash}", response_model=HotSearchSummaryItem)
+async def get_story_detail(title_hash: str, current_user: User = Depends(get_current_user)):
+    if db.pool is None:
+        raise HTTPException(503, detail="服务正在初始化")
+    async with db.pool.acquire() as conn:
+        item = await summary_queue.read_item(conn,title_hash)
+    if item is None:
+        raise HTTPException(404, detail="这条资讯不存在或已过期，请刷新列表")
+    return dict(item)
 
+
+@app.post("/api/weibo/cache/{title_hash}/summary", response_model=SingleSummaryResponse)
+async def fetch_story_summary(title_hash: str, response: Response, current_user: User = Depends(get_current_user)):
     if db.pool is None:
         raise HTTPException(503, detail="服务正在初始化")
 
-    query = """SELECT title_hash, title, url, description, description_source,
-        created_at, updated_at, expires_at FROM weibo_hot_search_cache
-        WHERE title_hash=$1 AND expires_at > NOW()"""
     async with db.pool.acquire() as conn:
-        item = await conn.fetchrow(query, title_hash)
+        item = await summary_queue.read_item(conn,title_hash)
         if item is None:
             raise HTTPException(404, detail="这条资讯不存在或已过期，请刷新列表")
         if item["description"]:
             return {"status": "cached", "item": dict(item)}
         if not item["url"]:
             raise HTTPException(400, detail="这条资讯缺少微博链接，请重新采集热搜后重试")
-        model_config = await resolve_user_model(conn, current_user.id)
-
-    try:
-        result = await _fetch_and_update_description_async(
-            item["title"], item["url"], 1, model_config=model_config, pool=db.pool
-        )
-    except Exception as error:
-        logger.warning("单条资讯获取失败 (%s)", type(error).__name__)
-        raise HTTPException(502, detail="本条资讯获取失败，请检查微博 Cookie 和模型连接后重试") from None
-    if not result.get("success"):
-        raise HTTPException(502, detail="本条资讯获取失败，请检查微博 Cookie 和模型连接后重试")
-
-    async with db.pool.acquire() as conn:
-        updated = await conn.fetchrow(query, title_hash)
-    if updated is None:
-        raise HTTPException(404, detail="这条资讯已被移除，请刷新列表")
-    if not updated["description"]:
-        raise HTTPException(502, detail="本条资讯暂未生成摘要，请稍后重试")
-    return {"status": "generated", "item": dict(updated)}
+        await resolve_user_model(conn, current_user.id)
+        await summary_queue.enqueue_missing(conn,user_id=current_user.id,title_hash=title_hash,retry=True)
+        item = await summary_queue.read_item(conn,title_hash)
+    response.status_code = 202
+    return {"status": "queued", "item": dict(item)}
 
 
-@app.post("/api/weibo/cache/fetch-missing")
+@app.post("/api/weibo/cache/fetch-missing",status_code=202)
 async def fetch_missing_descriptions(
     limit: int = 10,
     current_user: User = Depends(get_current_user)
 ):
-    """使用当前用户的模型生成缺失摘要，不阻塞 API 事件循环。"""
-    import asyncio
-    from ..tasks.weibo_tasks import _fetch_and_update_description_async
-
     if not 1 <= limit <= 50:
         raise HTTPException(422, detail="每次生成数量应在 1 到 50 之间")
     async with db.pool.acquire() as conn:
-        model_config = await resolve_user_model(conn, current_user.id)
-        if not model_config.api_key.get_secret_value():
-            raise HTTPException(400, detail="请先在设置中配置个人模型")
-        items = await conn.fetch("""
-            SELECT title, url FROM weibo_hot_search_cache
-            WHERE (description IS NULL OR description = '') AND expires_at > NOW()
-            ORDER BY created_at ASC LIMIT $1
-        """, limit)
-
-    semaphore = asyncio.Semaphore(2)
-
-    async def process(item, rank):
-        async with semaphore:
-            result = await _fetch_and_update_description_async(
-                item["title"], item["url"] or "", rank, model_config=model_config, pool=db.pool
-            )
-            success = result.get("success", False)
-            return {
-                "title": item["title"], "rank": rank,
-                "task_id": f"manual-{rank}", "status": "success" if success else "failed",
-                "description_source": result.get("description_source"),
-                "error": None if success else "未能生成摘要，请检查微博 Cookie 和模型连接",
-            }
-
-    results = await asyncio.gather(*(process(item, index+1) for index, item in enumerate(items)))
-    success_count = sum(item["status"] == "success" for item in results)
-    return {
-        "message": "批量生成完成" if results else "没有需要处理的任务",
-        "total_queued": len(results), "success_count": success_count,
-        "failed_count": len(results)-success_count, "items": results,
-    }
+        await resolve_user_model(conn,current_user.id)
+        queued = await summary_queue.enqueue_missing(conn,user_id=current_user.id,limit=limit,retry=True)
+    return {"message":"已加入摘要队列","total_queued":len(queued)}
 
 
 @app.post("/api/weibo/cache/fetch-hot-search")

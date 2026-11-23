@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     weibo_use_selenium: bool = True  # 是否使用 Selenium 爬虫
     weibo_scraper_timeout: int = 10
     weibo_cookie: str = ""  # 微博 Cookie，用于绕过 Sina Visitor System 验证
+    weibo_summary_username: str = ""
 
     # 微博热搜描述抓取方案选择
     # True: 使用 Selenium 爬虫（旧方案，需要 Chrome 浏览器）

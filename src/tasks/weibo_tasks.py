@@ -9,7 +9,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 
-async def _fetch_and_save_hot_search_titles_async(limit: int = 50, user_id: int | None = None):
+async def _fetch_and_save_hot_search_titles_async(limit: int = 50, user_id: int | None = None, pool=None):
     """
     异步函数：抓取并保存热搜标题
 
@@ -19,22 +19,19 @@ async def _fetch_and_save_hot_search_titles_async(limit: int = 50, user_id: int 
     Returns:
         dict: 统计信息
     """
-    from ..tools.weibo import get_scraper, HotSearchItem, WeiboScraper
+    from ..tools.weibo import WeiboScraper
     from ..tools.weibo_cache import WeiboHotSearchCache
     from ..agent.config import get_settings
+    from . import summary_queue
 
     settings = get_settings()
 
-    # 创建数据库连接池
-    pool = await asyncpg.create_pool(
-        host=settings.db_host,
-        port=settings.db_port,
-        user=settings.db_user,
-        password=settings.db_password,
-        database=settings.db_name,
-        min_size=1,
-        max_size=10
-    )
+    owns_pool = pool is None
+    if owns_pool:
+        pool = await asyncpg.create_pool(
+            host=settings.db_host,port=settings.db_port,user=settings.db_user,
+            password=settings.db_password,database=settings.db_name,min_size=1,max_size=3,
+        )
 
     try:
         logger.info(f"🔍 开始抓取微博热搜标题，数量: {limit}")
@@ -49,82 +46,46 @@ async def _fetch_and_save_hot_search_titles_async(limit: int = 50, user_id: int 
         items = await scraper._fetch_hot_search_items(limit)
         logger.info(f"✅ 抓取到 {len(items)} 条热搜")
 
-        # 3. 去重：检查哪些热搜已存在
         cache = WeiboHotSearchCache(pool)
-        titles = [item.title for item in items]
-        existing_titles = await cache.batch_exists(titles)
-        logger.info(f"✓ 已存在 {len(existing_titles)} 条热搜")
-
-        # 4. 筛选出新增热搜
-        new_items = [item for item in items if item.title not in existing_titles]
-        logger.info(f"✓ 新增 {len(new_items)} 条热搜")
-
-        # 构建每条热搜的状态详情
         items_status = []
-        for item in items:
-            is_new = item.title not in existing_titles
-            items_status.append({
-                'title': item.title,
-                'rank': item.rank,
-                'status': 'new' if is_new else 'duplicate',
-                'saved': False
-            })
-
-        if not new_items:
-            logger.info("✅ 没有新增热搜，任务完成")
-            return {
-                'total_fetched': len(items),
-                'new_items': 0,
-                'cached_items': len(existing_titles),
-                'description_tasks_queued': 0,
-                'items': items_status
-            }
-
-        # 5. 保存新增热搜（初始描述为空，同时保存URL）
         inserted_count = 0
-        for item in new_items:
-            saved = await cache.insert_initial(item.title, item.url)
-            if saved:
-                inserted_count += 1
-                # 更新状态
-                for status in items_status:
-                    if status['title'] == item.title:
-                        status['saved'] = True
-                        break
-
-        logger.info(f"✅ 成功保存 {inserted_count} 条新增热搜")
-
-        # 6. 为每条新增热搜触发异步描述生成任务
-        tasks_queued = 0
-        for item in new_items if user_id is not None else []:
-            try:
-                fetch_and_update_description.delay(
-                    title=item.title,
-                    url=item.url,
-                    rank=item.rank,
-                    user_id=user_id
-                )
-                tasks_queued += 1
-            except Exception as e:
-                logger.warning(f"⚠️  无法触发描述任务: {item.title}, 错误: {e}")
-                # Celery 不可用时继续处理其他任务
-
-        if tasks_queued > 0:
-            logger.info(f"✅ 已触发 {tasks_queued} 个描述生成任务")
-        else:
-            logger.info("ℹ️  描述生成任务未触发（Celery 不可用，请使用批量抓取描述功能）")
+        queued = []
+        async with pool.acquire() as conn:
+            await summary_queue.ensure_schema(conn)
+            async with conn.transaction():
+                for item in items:
+                    title_hash = cache.hash_title(item.title)
+                    now = datetime.now()
+                    saved = await conn.fetchval(
+                        """INSERT INTO weibo_hot_search_cache
+                            (title_hash,title,url,description,description_source,created_at,updated_at,expires_at)
+                            VALUES($1,$2,$3,'','',$4,$4,$5)
+                            ON CONFLICT(title_hash) DO NOTHING RETURNING title_hash""",
+                        title_hash,item.title,item.url or '',now,now+cache.CACHE_TTL,
+                    )
+                    if not saved:
+                        await conn.execute(
+                            """UPDATE weibo_hot_search_cache SET url=$2
+                                WHERE title_hash=$1 AND (url IS NULL OR url='')""",
+                            title_hash,item.url or '',
+                        )
+                    inserted_count += bool(saved)
+                    items_status.append({'title':item.title,'rank':item.rank,
+                        'status':'new' if saved else 'duplicate','saved':bool(saved)})
+                    queued.extend(await summary_queue.enqueue_missing(conn,user_id=user_id,title_hash=title_hash))
 
         return {
             'total_fetched': len(items),
-            'new_items': len(new_items),
-            'cached_items': len(existing_titles),
-            'description_tasks_queued': tasks_queued,
+            'new_items': inserted_count,
+            'cached_items': len(items)-inserted_count,
+            'description_tasks_queued': len(queued),
             'items': items_status,
             'timestamp': datetime.now().isoformat()
         }
 
     finally:
-        await pool.close()
+        if owns_pool:
+            await pool.close()
 
 
 @shared_task(
@@ -134,27 +95,7 @@ async def _fetch_and_save_hot_search_titles_async(limit: int = 50, user_id: int 
     default_retry_delay=300,  # 5分钟后重试
 )
 def fetch_and_save_hot_search_titles(self, limit: int = 50):
-    """
-    定时任务：每小时抓取微博热搜标题并保存到数据库
-
-    流程：
-    1. 使用 asyncio 运行异步爬虫
-    2. 调用 fetch_hot_search(fetch_descriptions=False) 只获取标题
-    3. 去重：检查 title_hash 是否已存在
-    4. 只保存新增热搜（description 初始为空）
-    5. 为每条新增热搜触发异步描述生成任务
-
-    Args:
-        limit: 抓取热搜数量，默认50条
-
-    Returns:
-        dict: {
-            'total_fetched': int,      # 抓取到的总数
-            'new_items': int,          # 新增热搜数
-            'cached_items': int,       # 已缓存（跳过）数
-            'description_tasks_queued': int  # 触发的描述任务数
-        }
-    """
+    """每三小时采集标题与链接，保存后加入摘要队列。"""
     try:
         # 使用 asyncio 运行异步函数
         loop = asyncio.new_event_loop()
@@ -471,30 +412,7 @@ async def _fetch_with_http(title: str, url: str, rank: int, pool, model_config=N
     default_retry_delay=60,  # 1分钟后重试
 )
 def fetch_and_update_description(self, title: str, url: str, rank: int, user_id: int | None = None):
-    """
-    异步任务：为单条热搜抓取描述并更新数据库
-
-    Args:
-        title: 热搜标题
-        url: 热搜链接
-        rank: 热搜排名
-
-    流程：
-    1. 调用 WeiboScraper._fetch_item_content() 爬取微博内容
-    2. 调用 LLM 生成描述（summarize_weibo_content）
-    3. 更新数据库记录（使用 WeiboHotSearchCache.set()）
-    4. 失败时自动重试（最多3次），描述留空
-
-    Returns:
-        dict: {
-            'title': str,
-            'rank': int,
-            'success': bool,
-            'description': str | None,
-            'description_source': str | None,  # 'weibo_detail' | None
-            'timestamp': str
-        }
-    """
+    """兼容旧的 Redis 任务，将尚未完成的条目转入持久化摘要队列。"""
     try:
         # 使用 asyncio 运行异步函数
         loop = asyncio.new_event_loop()
@@ -502,10 +420,10 @@ def fetch_and_update_description(self, title: str, url: str, rank: int, user_id:
 
         try:
             result = loop.run_until_complete(
-                _fetch_and_update_description_async(title, url, rank, user_id=user_id)
+                _enqueue_legacy_summary(title,user_id)
             )
 
-            if result['success']:
+            if result.get('success'):
                 logger.info(f"✅ 热搜描述任务成功：[{rank}] {title[:30]}...")
             else:
                 logger.warning(f"⚠️ 热搜描述任务失败：[{rank}] {title[:30]}...")
@@ -533,3 +451,46 @@ def fetch_and_update_description(self, title: str, url: str, rank: int, user_id:
             'retries': self.request.retries,
             'timestamp': datetime.now().isoformat()
         }
+
+
+async def _enqueue_legacy_summary(title,user_id):
+    from . import summary_queue
+    from ..agent.config import get_settings
+    from ..tools.weibo_cache import WeiboHotSearchCache
+    settings=get_settings()
+    pool=await asyncpg.create_pool(
+        host=settings.db_host,port=settings.db_port,user=settings.db_user,
+        password=settings.db_password,database=settings.db_name,min_size=1,max_size=3,
+    )
+    try:
+        async with pool.acquire() as conn:
+            await summary_queue.ensure_schema(conn)
+            await summary_queue.enqueue_missing(conn,user_id=user_id,title_hash=WeiboHotSearchCache.hash_title(title))
+        return {"status":"queued","success":True}
+    finally:
+        await pool.close()
+
+
+async def _process_summary_queue_async():
+    from .summary_queue import process_next
+    from ..agent.config import get_settings
+    settings=get_settings()
+    pool=await asyncpg.create_pool(
+        host=settings.db_host,port=settings.db_port,user=settings.db_user,
+        password=settings.db_password,database=settings.db_name,min_size=1,max_size=3,
+    )
+    try:
+        return await process_next(pool)
+    finally:
+        await pool.close()
+
+
+@shared_task(name='src.tasks.weibo_tasks.process_summary_queue',soft_time_limit=210,time_limit=240)
+def process_summary_queue():
+    result=asyncio.run(_process_summary_queue_async())
+    if result["status"] in {"completed","retry"}:
+        try:
+            process_summary_queue.apply_async(retry=False)
+        except Exception as error:
+            logger.warning("摘要队列唤醒失败，等待定时恢复 (%s)",type(error).__name__)
+    return result
