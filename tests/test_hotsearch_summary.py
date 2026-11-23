@@ -19,9 +19,10 @@ from src.auth.router import get_current_user
 from src.settings.models import ModelSettingsInput
 from src.settings.service import ModelSettingsService
 from src.tools.weibo_cache import WeiboHotSearchCache
+from src.tasks.summary_queue import process_next
 
 
-class HotSearchSummaryTests(unittest.IsolatedAsyncioTestCase):
+class HotSearchFixture(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         settings = get_settings()
         database = {
@@ -50,6 +51,8 @@ class HotSearchSummaryTests(unittest.IsolatedAsyncioTestCase):
                 created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL,
                 expires_at TIMESTAMP NOT NULL
             )""")
+            from src.tasks.summary_queue import ensure_schema
+            await ensure_schema(conn)
 
         self.requests = []
         self.model_requests = []
@@ -181,15 +184,17 @@ class HotSearchSummaryTests(unittest.IsolatedAsyncioTestCase):
                 )
             )
 
+class HotSearchSummaryTests(HotSearchFixture):
     async def test_single_summary_fetches_and_updates_only_selected_story(self):
         response = await self.generate_selected()
-        self.assertEqual(response.status_code, 200, response.text)
-        payload = response.json()
-        self.assertEqual(payload["status"], "generated")
-        self.assertEqual(payload["item"]["title_hash"], self.selected_hash)
-        self.assertEqual(payload["item"]["title"], "用户当前选中的资讯")
+        self.assertEqual(response.status_code, 202, response.text)
+        self.assertEqual(self.requests, [])
+        await process_next(self.pool)
+        payload = (await self.client.get(f"/api/weibo/cache/{self.selected_hash}")).json()
+        self.assertEqual(payload["title_hash"], self.selected_hash)
+        self.assertEqual(payload["title"], "用户当前选中的资讯")
         self.assertEqual(
-            payload["item"]["description"], "Agent总结: 已根据当前话题生成的内容摘要。"
+            payload["description"], "Agent总结: 已根据当前话题生成的内容摘要。"
         )
         self.assertEqual(
             self.requests, [("GET", "/selected"), ("POST", "/v1/chat/completions")]
@@ -202,16 +207,20 @@ class HotSearchSummaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(descriptions[self.old_hash])
         self.assertIsNone(descriptions[self.next_hash])
         self.assertEqual(
-            descriptions[self.selected_hash], payload["item"]["description"]
+            descriptions[self.selected_hash], payload["description"]
         )
 
     async def test_retry_reuses_existing_summary_without_another_fetch(self):
         first = await self.generate_selected()
-        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.status_code, 202)
+        await self.generate_selected()
+        async with self.pool.acquire() as conn:
+            self.assertEqual(await conn.fetchval("SELECT COUNT(*) FROM weibo_summary_jobs"),1)
+        await process_next(self.pool)
         second = await self.generate_selected()
         self.assertEqual(second.status_code, 200)
         self.assertEqual(second.json()["status"], "cached")
-        self.assertEqual(second.json()["item"], first.json()["item"])
+        self.assertEqual(second.json()["item"]["summary_status"],"ready")
         self.assertEqual(len(self.requests), 2)
 
     async def test_unknown_or_expired_story_is_not_fetched(self):
@@ -243,7 +252,9 @@ class HotSearchSummaryTests(unittest.IsolatedAsyncioTestCase):
                 self.selected_hash,
             )
         response = await self.generate_selected()
-        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.status_code, 202)
+        result=await process_next(self.pool)
+        self.assertEqual(result["status"],"retry")
         self.assertNotIn("test-only-model-key", response.text)
         self.assertEqual(self.requests, [("GET", "/blocked")])
         self.assertTrue(
@@ -265,14 +276,121 @@ class HotSearchSummaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 401)
         self.assertEqual(self.requests, [])
 
-    async def test_batch_generation_still_processes_oldest_missing_story(self):
+    async def test_batch_queue_still_processes_oldest_missing_story(self):
         response = await self.client.post(
             "/api/weibo/cache/fetch-missing", params={"limit": 1}
         )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["success_count"], 1)
-        self.assertEqual(response.json()["items"][0]["title"], "最早待处理的其他资讯")
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json()["total_queued"], 1)
+        result=await process_next(self.pool)
+        self.assertEqual(result["title_hash"],self.old_hash)
         descriptions = await self.descriptions()
         self.assertTrue(descriptions[self.old_hash])
         self.assertIsNone(descriptions[self.selected_hash])
         self.assertIsNone(descriptions[self.next_hash])
+
+    async def test_summary_status_filters_before_pagination_and_count(self):
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE weibo_hot_search_cache SET description='已有摘要' WHERE title_hash=$1",
+                self.selected_hash,
+            )
+            await conn.execute(
+                "UPDATE weibo_hot_search_cache SET description='' WHERE title_hash=$1",
+                self.next_hash,
+            )
+        ready = await self.client.get("/api/weibo/cache", params={"status": "ready"})
+        self.assertEqual(ready.status_code, 200, ready.text)
+        self.assertEqual(ready.json()["total"], 1)
+        self.assertEqual(ready.json()["items"][0]["title_hash"], self.selected_hash)
+
+        pending = await self.client.get(
+            "/api/weibo/cache", params={"status": "pending", "limit": 1, "offset": 1}
+        )
+        self.assertEqual(pending.status_code, 200, pending.text)
+        self.assertEqual(pending.json()["total"], 2)
+        self.assertEqual(len(pending.json()["items"]), 1)
+        self.assertEqual(pending.json()["items"][0]["title_hash"], self.old_hash)
+
+    async def test_summary_status_combines_with_search_and_dates(self):
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE weibo_hot_search_cache SET description='已有摘要' WHERE title_hash=$1",
+                self.selected_hash,
+            )
+        response = await self.client.get(
+            "/api/weibo/cache",
+            params={
+                "status": "ready",
+                "search": "当前选中",
+                "start_date": (datetime.now() - timedelta(days=1)).isoformat(),
+                "end_date": (datetime.now() + timedelta(days=1)).isoformat(),
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["total"], 1)
+        self.assertEqual(response.json()["items"][0]["title_hash"], self.selected_hash)
+        excluded = await self.client.get(
+            "/api/weibo/cache", params={"status": "pending", "search": "当前选中"}
+        )
+        self.assertEqual(excluded.json()["total"], 0)
+
+    async def test_cache_list_and_detail_exclude_expired_entries(self):
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE weibo_hot_search_cache SET expires_at=NOW()-INTERVAL '1 day' WHERE title_hash=$1",
+                self.selected_hash,
+            )
+        response = await self.client.get("/api/weibo/cache")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["total"], 2)
+        self.assertNotIn(
+            self.selected_hash, [item["title_hash"] for item in response.json()["items"]]
+        )
+        detail = await self.client.get(f"/api/weibo/cache/{self.selected_hash}")
+        self.assertEqual(detail.status_code, 404)
+
+    async def test_read_detail_does_not_fetch_or_generate_content(self):
+        response = await self.client.get(f"/api/weibo/cache/{self.selected_hash}")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["title_hash"], self.selected_hash)
+        self.assertEqual(response.json()["url"], self.origin + "/selected")
+        self.assertIsNone(response.json()["description"])
+        self.assertEqual(self.requests, [])
+
+    async def test_cache_detail_requires_login_and_returns_not_found(self):
+        response = await self.client.get(f"/api/weibo/cache/{'0' * 64}")
+        self.assertEqual(response.status_code, 404)
+        server.app.dependency_overrides.pop(get_current_user)
+        response = await self.client.get(f"/api/weibo/cache/{self.selected_hash}")
+        self.assertEqual(response.status_code, 401)
+
+    async def test_cache_filters_validate_range_status_and_pagination(self):
+        invalid_queries = [
+            {"status": "unknown"},
+            {"start_date": "not-a-date"},
+            {"start_date": "2026-11-21T00:00:00", "end_date": "2026-11-20T00:00:00"},
+            {"limit": 0},
+            {"offset": -1},
+        ]
+        for params in invalid_queries:
+            with self.subTest(params=params):
+                response = await self.client.get("/api/weibo/cache", params=params)
+                self.assertEqual(response.status_code, 422, response.text)
+
+    async def test_summary_request_returns_after_queueing_without_fetching_content(self):
+        response = await self.generate_selected()
+        self.assertEqual(response.status_code, 202, response.text)
+        self.assertEqual(response.json()["status"], "queued")
+        self.assertEqual(response.json()["item"]["title_hash"], self.selected_hash)
+        self.assertEqual(self.requests, [])
+        self.assertIsNone((await self.descriptions())[self.selected_hash])
+
+    async def test_batch_request_queues_without_waiting_for_summaries(self):
+        response = await self.client.post(
+            "/api/weibo/cache/fetch-missing", params={"limit": 2}
+        )
+        self.assertEqual(response.status_code, 202, response.text)
+        self.assertEqual(response.json()["total_queued"], 2)
+        self.assertEqual(self.requests, [])
+        self.assertTrue(all(value is None for value in (await self.descriptions()).values()))

@@ -45,6 +45,11 @@ celery_app.conf.update(
 
 # 定时任务配置
 celery_app.conf.beat_schedule = {
+    'process-weibo-summary-queue': {
+        'task': 'src.tasks.weibo_tasks.process_summary_queue',
+        'schedule': 5.0,
+        'options': {'expires': 10},
+    },
     # 每10分钟清理一次过期缓存
     'clean-expired-weibo-cache': {
         'task': 'src.tasks.cache_tasks.clean_expired_cache',
